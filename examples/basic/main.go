@@ -39,14 +39,14 @@ func main() {
 	// Create agents for different providers
 	openaiAgent := agents.NewAgent("OpenAI Assistant",
 		agents.WithInstructions("You are a helpful assistant powered by OpenAI."),
-		agents.WithModel("gpt-4"),
+		agents.WithModel("gpt-3.5-turbo"),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
 
 	anthropicAgent := agents.NewAgent("Anthropic Assistant",
 		agents.WithInstructions("You are a helpful assistant powered by Anthropic Claude."),
-		agents.WithModel("claude-3-5-sonnet"),
+		agents.WithModel("claude-3-5-sonnet-20241022"),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
@@ -96,14 +96,17 @@ func main() {
 
 		openaiResult, err = openaiRunner.Run(ctx, openaiAgent, input)
 		if err != nil {
-			log.Fatal("OpenAI runner failed:", err)
+			fmt.Printf("⚠️  OpenAI runner failed: %v\n", err)
+			fmt.Println("   This might be due to API quota, invalid model, or network issues.")
 		}
 
-		fmt.Printf("📋 Agent: %s\n", openaiAgent.GetName())
-		fmt.Printf("🤖 Model: %s\n", openaiAgent.GetModel())
-		fmt.Printf("💬 Response: %s\n", openaiResult.FinalOutput)
-		fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
-		fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
+		if openaiResult != nil {
+			fmt.Printf("📋 Agent: %s\n", openaiAgent.GetName())
+			fmt.Printf("🤖 Model: %s\n", openaiAgent.GetModel())
+			fmt.Printf("💬 Response: %s\n", openaiResult.FinalOutput)
+			fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
+			fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
+		}
 	} else {
 		fmt.Println("\n🔥 OpenAI Provider")
 		fmt.Println("==========================")
@@ -128,14 +131,17 @@ func main() {
 
 		anthropicResult, err = anthropicRunner.Run(ctx, anthropicAgent, input)
 		if err != nil {
-			log.Fatal("Anthropic runner failed:", err)
+			fmt.Printf("⚠️  Anthropic runner failed: %v\n", err)
+			fmt.Println("   This might be due to API quota, invalid model, or network issues.")
 		}
 
-		fmt.Printf("📋 Agent: %s\n", anthropicAgent.GetName())
-		fmt.Printf("🤖 Model: %s\n", anthropicAgent.GetModel())
-		fmt.Printf("💬 Response: %s\n", anthropicResult.FinalOutput)
-		fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
-		fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
+		if anthropicResult != nil {
+			fmt.Printf("📋 Agent: %s\n", anthropicAgent.GetName())
+			fmt.Printf("🤖 Model: %s\n", anthropicAgent.GetModel())
+			fmt.Printf("💬 Response: %s\n", anthropicResult.FinalOutput)
+			fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
+			fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
+		}
 	} else {
 		fmt.Println("\n🟣 Anthropic Provider")
 		fmt.Println("=============================")
