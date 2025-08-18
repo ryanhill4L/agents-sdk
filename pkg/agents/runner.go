@@ -56,7 +56,7 @@ func NewRunner(opts ...RunnerOption) *Runner {
 
 	// Set defaults if not provided
 	if r.provider == nil {
-		r.provider = providers.NewOpenAIProvider()
+		r.provider = providers.NewDefaultOpenAIProvider()
 	}
 
 	if r.tracer == nil {
@@ -139,7 +139,8 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 		}
 
 		// Get LLM completion
-		completion, err := r.provider.Complete(ctx.Context, currentAgent, messagesToProviders(messages))
+		toolDefs := convertToolsToProviders(currentAgent.Tools)
+		completion, err := r.provider.Complete(ctx.Context, currentAgent, messagesToProviders(messages), toolDefs)
 		if err != nil {
 			return nil, fmt.Errorf("completion failed: %w", err)
 		}
@@ -382,6 +383,36 @@ func messagesFromMemory(msgs []memory.Message) []Message {
 			Content:   msg.Content,
 			Metadata:  msg.Metadata,
 			Timestamp: msg.Timestamp,
+		}
+	}
+	return result
+}
+
+// convertToolsToProviders converts agents tools to provider tool definitions
+func convertToolsToProviders(tools []tools.Tool) []providers.ToolDefinition {
+	result := make([]providers.ToolDefinition, len(tools))
+	for i, tool := range tools {
+		schema := tool.Schema()
+		result[i] = providers.ToolDefinition{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+			Schema: providers.ParameterSchema{
+				Type:       schema.Type,
+				Properties: convertProperties(schema.Properties),
+				Required:   schema.Required,
+			},
+		}
+	}
+	return result
+}
+
+// convertProperties converts tools.PropertySchema to providers.PropertySchema
+func convertProperties(props map[string]tools.PropertySchema) map[string]providers.PropertySchema {
+	result := make(map[string]providers.PropertySchema)
+	for name, prop := range props {
+		result[name] = providers.PropertySchema{
+			Type:        prop.Type,
+			Description: prop.Description,
 		}
 	}
 	return result

@@ -15,6 +15,26 @@ type Agent interface {
 	GetTopP() float32
 }
 
+// ToolDefinition represents a tool's metadata for providers
+type ToolDefinition struct {
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Schema      ParameterSchema           `json:"schema"`
+}
+
+// ParameterSchema describes function parameters
+type ParameterSchema struct {
+	Type       string                    `json:"type"`
+	Properties map[string]PropertySchema `json:"properties"`
+	Required   []string                  `json:"required"`
+}
+
+// PropertySchema describes a single parameter
+type PropertySchema struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
 // Message represents a conversation message
 type Message struct {
 	Role      string                 `json:"role"`
@@ -40,8 +60,8 @@ type HandoffRequest struct {
 
 // Provider represents an LLM provider
 type Provider interface {
-	// Complete generates a completion for the given agent and messages
-	Complete(ctx context.Context, agent Agent, messages []Message) (*Completion, error)
+	// Complete generates a completion for the given agent, messages, and available tools
+	Complete(ctx context.Context, agent Agent, messages []Message, tools []ToolDefinition) (*Completion, error)
 }
 
 // Completion represents the result of an LLM completion
@@ -60,17 +80,17 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// NewOpenAIProvider creates a default OpenAI provider
+// NewDefaultOpenAIProvider creates a default OpenAI provider with no API key
 // This is referenced in runner.go but needs to be implemented
-func NewOpenAIProvider() Provider {
-	// TODO: Implement OpenAI provider
+func NewDefaultOpenAIProvider() Provider {
+	// Return NoOp provider since no config is provided
 	return &NoOpProvider{}
 }
 
 // NoOpProvider is a placeholder provider for testing
 type NoOpProvider struct{}
 
-func (p *NoOpProvider) Complete(ctx context.Context, agent Agent, messages []Message) (*Completion, error) {
+func (p *NoOpProvider) Complete(ctx context.Context, agent Agent, messages []Message, tools []ToolDefinition) (*Completion, error) {
 	// Return a simple completion for testing
 	return &Completion{
 		Message: Message{

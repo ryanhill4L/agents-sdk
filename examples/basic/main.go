@@ -21,8 +21,8 @@ func greet(name string) string {
 }
 
 func main() {
-	fmt.Println("🤖 OpenAI Agents SDK - Basic Example")
-	fmt.Println("===================================")
+	fmt.Println("🤖 Agents SDK - Provider Comparison Example")
+	fmt.Println("==========================================")
 
 	// Create some tools
 	addTool, err := tools.NewFunctionTool("add", "Adds two numbers together", add)
@@ -35,47 +35,94 @@ func main() {
 		log.Fatal("Failed to create greet tool:", err)
 	}
 
-	// Create agent with tools
-	agent := agents.NewAgent("Assistant",
-		agents.WithInstructions("You are a helpful assistant with access to tools."),
+	// Create agents for different providers
+	openaiAgent := agents.NewAgent("OpenAI Assistant",
+		agents.WithInstructions("You are a helpful assistant powered by OpenAI."),
 		agents.WithModel("gpt-4"),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
 
-	// Validate agent
-	if err := agent.Validate(); err != nil {
-		log.Fatal("Agent validation failed:", err)
-	}
-
-	fmt.Println("✅ Created agent:", agent.GetName())
-	fmt.Println("📋 Instructions:", agent.GetInstructions())
-	fmt.Println("🛠️  Tools available:", len(agent.Tools))
-
-	// Create runner with console tracer for debugging
-	runner := agents.NewRunner(
-		agents.WithProvider(providers.NewOpenAIProvider()),
-		agents.WithTracer(tracing.NewConsoleTracer()),
-		agents.WithMaxTurns(5),
+	anthropicAgent := agents.NewAgent("Anthropic Assistant",
+		agents.WithInstructions("You are a helpful assistant powered by Anthropic Claude."),
+		agents.WithModel("claude-3-5-sonnet"),
+		agents.WithTools(addTool, greetTool),
+		agents.WithTemperature(0.7),
 	)
 
-	// Run a simple interaction
+	// Validate agents
+	if err := openaiAgent.Validate(); err != nil {
+		log.Fatal("OpenAI agent validation failed:", err)
+	}
+	if err := anthropicAgent.Validate(); err != nil {
+		log.Fatal("Anthropic agent validation failed:", err)
+	}
+
+	// Test input
+	input := "Hello! Can you add 5 and 3 for me?"
 	ctx := context.Background()
-	result, err := runner.Run(ctx, agent, "Hello! Can you add 5 and 3 for me?")
+
+	// Test OpenAI Provider
+	fmt.Println("\n🔥 Testing OpenAI Provider")
+	fmt.Println("==========================")
+	
+	openaiProvider, err := providers.NewOpenAIProviderWithKey("test-key")
 	if err != nil {
-		log.Fatal("Failed to run agent:", err)
+		log.Fatal("Failed to create OpenAI provider:", err)
 	}
 
-	// Display results
-	fmt.Println("\n🏁 Results:")
-	fmt.Println("Final Output:", result.FinalOutput)
-	fmt.Println("Total Turns:", result.Metrics.TotalTurns)
-	fmt.Println("Total Tokens:", result.Metrics.TotalTokens)
-	fmt.Println("Tool Calls:", result.Metrics.ToolCalls)
-	fmt.Println("Duration:", result.Metrics.Duration)
+	openaiRunner := agents.NewRunner(
+		agents.WithProvider(openaiProvider),
+		agents.WithTracer(tracing.NewConsoleTracer()),
+		agents.WithMaxTurns(3),
+	)
 
-	fmt.Println("\n💬 Conversation:")
-	for i, msg := range result.Messages {
-		fmt.Printf("%d. [%s] %s\n", i+1, msg.Role, msg.Content)
+	openaiResult, err := openaiRunner.Run(ctx, openaiAgent, input)
+	if err != nil {
+		log.Fatal("OpenAI runner failed:", err)
 	}
+
+	fmt.Printf("📋 Agent: %s\n", openaiAgent.GetName())
+	fmt.Printf("🤖 Model: %s\n", openaiAgent.GetModel())
+	fmt.Printf("💬 Response: %s\n", openaiResult.FinalOutput)
+	fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
+	fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
+
+	// Test Anthropic Provider
+	fmt.Println("\n🟣 Testing Anthropic Provider")
+	fmt.Println("=============================")
+	
+	anthropicProvider, err := providers.NewAnthropicProviderWithKey("test-key")
+	if err != nil {
+		log.Fatal("Failed to create Anthropic provider:", err)
+	}
+
+	anthropicRunner := agents.NewRunner(
+		agents.WithProvider(anthropicProvider),
+		agents.WithTracer(tracing.NewConsoleTracer()),
+		agents.WithMaxTurns(3),
+	)
+
+	anthropicResult, err := anthropicRunner.Run(ctx, anthropicAgent, input)
+	if err != nil {
+		log.Fatal("Anthropic runner failed:", err)
+	}
+
+	fmt.Printf("📋 Agent: %s\n", anthropicAgent.GetName())
+	fmt.Printf("🤖 Model: %s\n", anthropicAgent.GetModel())
+	fmt.Printf("💬 Response: %s\n", anthropicResult.FinalOutput)
+	fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
+	fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
+
+	// Compare results
+	fmt.Println("\n📈 Comparison")
+	fmt.Println("=============")
+	fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n", 
+		openaiResult.Metrics.Duration, anthropicResult.Metrics.Duration)
+	fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n", 
+		openaiResult.Metrics.TotalTokens, anthropicResult.Metrics.TotalTokens)
+	
+	fmt.Println("\n✅ Provider comparison completed successfully!")
+	fmt.Println("💡 Note: These are placeholder implementations.")
+	fmt.Println("🔧 Actual API integration requires valid API keys and proper SDK implementation.")
 }
