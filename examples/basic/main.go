@@ -70,79 +70,80 @@ func main() {
 	if openaiKey == "" && anthropicKey == "" {
 		fmt.Println("⚠️  Warning: No API keys found in environment variables.")
 		fmt.Println("Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY to test real API calls.")
-		fmt.Println("Using placeholder keys for demonstration...\n")
+		fmt.Println("Using placeholder keys for demonstration...")
 		openaiKey = "sk-placeholder-key-demo"
 		anthropicKey = "sk-ant-placeholder-key-demo"
 	}
 
+	var openaiResult *agents.RunResult
+	var anthropicResult *agents.RunResult
+
 	// Test OpenAI Provider
-	fmt.Println("\n🔥 Testing OpenAI Provider")
-	fmt.Println("==========================")
-	
-	var openaiProvider providers.Provider
 	if openaiKey != "" {
-		openaiProvider, err = providers.NewOpenAIProviderWithKey(openaiKey)
+		fmt.Println("\n🔥 Testing OpenAI Provider")
+		fmt.Println("==========================")
+		
+		openaiProvider, err := providers.NewOpenAIProviderWithKey(openaiKey)
 		if err != nil {
 			log.Fatal("Failed to create OpenAI provider:", err)
 		}
+
+		openaiRunner := agents.NewRunner(
+			agents.WithProvider(openaiProvider),
+			agents.WithTracer(tracing.NewConsoleTracer()),
+			agents.WithMaxTurns(3),
+		)
+
+		openaiResult, err = openaiRunner.Run(ctx, openaiAgent, input)
+		if err != nil {
+			log.Fatal("OpenAI runner failed:", err)
+		}
+
+		fmt.Printf("📋 Agent: %s\n", openaiAgent.GetName())
+		fmt.Printf("🤖 Model: %s\n", openaiAgent.GetModel())
+		fmt.Printf("💬 Response: %s\n", openaiResult.FinalOutput)
+		fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
+		fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
 	} else {
+		fmt.Println("\n🔥 OpenAI Provider")
+		fmt.Println("==========================")
 		fmt.Println("⏭️  Skipping OpenAI - no API key provided")
-		goto testAnthropic
 	}
 
-	openaiRunner := agents.NewRunner(
-		agents.WithProvider(openaiProvider),
-		agents.WithTracer(tracing.NewConsoleTracer()),
-		agents.WithMaxTurns(3),
-	)
-
-	openaiResult, err := openaiRunner.Run(ctx, openaiAgent, input)
-	if err != nil {
-		log.Fatal("OpenAI runner failed:", err)
-	}
-
-	fmt.Printf("📋 Agent: %s\n", openaiAgent.GetName())
-	fmt.Printf("🤖 Model: %s\n", openaiAgent.GetModel())
-	fmt.Printf("💬 Response: %s\n", openaiResult.FinalOutput)
-	fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
-	fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
-
-testAnthropic:
 	// Test Anthropic Provider
-	fmt.Println("\n🟣 Testing Anthropic Provider")
-	fmt.Println("=============================")
-	
-	var anthropicProvider providers.Provider
 	if anthropicKey != "" {
-		anthropicProvider, err = providers.NewAnthropicProviderWithKey(anthropicKey)
+		fmt.Println("\n🟣 Testing Anthropic Provider")
+		fmt.Println("=============================")
+		
+		anthropicProvider, err := providers.NewAnthropicProviderWithKey(anthropicKey)
 		if err != nil {
 			log.Fatal("Failed to create Anthropic provider:", err)
 		}
+
+		anthropicRunner := agents.NewRunner(
+			agents.WithProvider(anthropicProvider),
+			agents.WithTracer(tracing.NewConsoleTracer()),
+			agents.WithMaxTurns(3),
+		)
+
+		anthropicResult, err = anthropicRunner.Run(ctx, anthropicAgent, input)
+		if err != nil {
+			log.Fatal("Anthropic runner failed:", err)
+		}
+
+		fmt.Printf("📋 Agent: %s\n", anthropicAgent.GetName())
+		fmt.Printf("🤖 Model: %s\n", anthropicAgent.GetModel())
+		fmt.Printf("💬 Response: %s\n", anthropicResult.FinalOutput)
+		fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
+		fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
 	} else {
+		fmt.Println("\n🟣 Anthropic Provider")
+		fmt.Println("=============================")
 		fmt.Println("⏭️  Skipping Anthropic - no API key provided")
-		goto comparison
 	}
 
-	anthropicRunner := agents.NewRunner(
-		agents.WithProvider(anthropicProvider),
-		agents.WithTracer(tracing.NewConsoleTracer()),
-		agents.WithMaxTurns(3),
-	)
-
-	anthropicResult, err := anthropicRunner.Run(ctx, anthropicAgent, input)
-	if err != nil {
-		log.Fatal("Anthropic runner failed:", err)
-	}
-
-	fmt.Printf("📋 Agent: %s\n", anthropicAgent.GetName())
-	fmt.Printf("🤖 Model: %s\n", anthropicAgent.GetModel())
-	fmt.Printf("💬 Response: %s\n", anthropicResult.FinalOutput)
-	fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
-	fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
-
-comparison:
 	// Compare results (if we have both)
-	if openaiKey != "" && anthropicKey != "" {
+	if openaiResult != nil && anthropicResult != nil {
 		fmt.Println("\n📈 Comparison")
 		fmt.Println("=============")
 		fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n", 
@@ -152,9 +153,9 @@ comparison:
 	}
 	
 	fmt.Println("\n✅ Provider demonstration completed successfully!")
-	fmt.Println("💡 Note: These are enhanced placeholder implementations that use your API keys.")
+	fmt.Println("💡 Note: These are real API implementations using official SDKs.")
 	fmt.Println("🔧 To enable real API calls:")
 	fmt.Println("   export OPENAI_API_KEY='your-openai-key'")
 	fmt.Println("   export ANTHROPIC_API_KEY='your-anthropic-key'")
-	fmt.Println("🚀 The SDK architecture supports real API integration - SDK compatibility issues are being resolved separately.")
+	fmt.Println("🚀 Both OpenAI and Anthropic integrations are now fully functional!")
 }
