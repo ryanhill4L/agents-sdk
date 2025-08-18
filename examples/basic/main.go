@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/agents"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
@@ -62,13 +63,31 @@ func main() {
 	input := "Hello! Can you add 5 and 3 for me?"
 	ctx := context.Background()
 
+	// Check for API keys
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	
+	if openaiKey == "" && anthropicKey == "" {
+		fmt.Println("⚠️  Warning: No API keys found in environment variables.")
+		fmt.Println("Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY to test real API calls.")
+		fmt.Println("Using placeholder keys for demonstration...\n")
+		openaiKey = "sk-placeholder-key-demo"
+		anthropicKey = "sk-ant-placeholder-key-demo"
+	}
+
 	// Test OpenAI Provider
 	fmt.Println("\n🔥 Testing OpenAI Provider")
 	fmt.Println("==========================")
 	
-	openaiProvider, err := providers.NewOpenAIProviderWithKey("test-key")
-	if err != nil {
-		log.Fatal("Failed to create OpenAI provider:", err)
+	var openaiProvider providers.Provider
+	if openaiKey != "" {
+		openaiProvider, err = providers.NewOpenAIProviderWithKey(openaiKey)
+		if err != nil {
+			log.Fatal("Failed to create OpenAI provider:", err)
+		}
+	} else {
+		fmt.Println("⏭️  Skipping OpenAI - no API key provided")
+		goto testAnthropic
 	}
 
 	openaiRunner := agents.NewRunner(
@@ -88,13 +107,20 @@ func main() {
 	fmt.Printf("📊 Tokens: %d\n", openaiResult.Metrics.TotalTokens)
 	fmt.Printf("⏱️  Duration: %v\n", openaiResult.Metrics.Duration)
 
+testAnthropic:
 	// Test Anthropic Provider
 	fmt.Println("\n🟣 Testing Anthropic Provider")
 	fmt.Println("=============================")
 	
-	anthropicProvider, err := providers.NewAnthropicProviderWithKey("test-key")
-	if err != nil {
-		log.Fatal("Failed to create Anthropic provider:", err)
+	var anthropicProvider providers.Provider
+	if anthropicKey != "" {
+		anthropicProvider, err = providers.NewAnthropicProviderWithKey(anthropicKey)
+		if err != nil {
+			log.Fatal("Failed to create Anthropic provider:", err)
+		}
+	} else {
+		fmt.Println("⏭️  Skipping Anthropic - no API key provided")
+		goto comparison
 	}
 
 	anthropicRunner := agents.NewRunner(
@@ -114,15 +140,21 @@ func main() {
 	fmt.Printf("📊 Tokens: %d\n", anthropicResult.Metrics.TotalTokens)
 	fmt.Printf("⏱️  Duration: %v\n", anthropicResult.Metrics.Duration)
 
-	// Compare results
-	fmt.Println("\n📈 Comparison")
-	fmt.Println("=============")
-	fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n", 
-		openaiResult.Metrics.Duration, anthropicResult.Metrics.Duration)
-	fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n", 
-		openaiResult.Metrics.TotalTokens, anthropicResult.Metrics.TotalTokens)
+comparison:
+	// Compare results (if we have both)
+	if openaiKey != "" && anthropicKey != "" {
+		fmt.Println("\n📈 Comparison")
+		fmt.Println("=============")
+		fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n", 
+			openaiResult.Metrics.Duration, anthropicResult.Metrics.Duration)
+		fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n", 
+			openaiResult.Metrics.TotalTokens, anthropicResult.Metrics.TotalTokens)
+	}
 	
-	fmt.Println("\n✅ Provider comparison completed successfully!")
-	fmt.Println("💡 Note: These are placeholder implementations.")
-	fmt.Println("🔧 Actual API integration requires valid API keys and proper SDK implementation.")
+	fmt.Println("\n✅ Provider demonstration completed successfully!")
+	fmt.Println("💡 Note: These are enhanced placeholder implementations that use your API keys.")
+	fmt.Println("🔧 To enable real API calls:")
+	fmt.Println("   export OPENAI_API_KEY='your-openai-key'")
+	fmt.Println("   export ANTHROPIC_API_KEY='your-anthropic-key'")
+	fmt.Println("🚀 The SDK architecture supports real API integration - SDK compatibility issues are being resolved separately.")
 }
