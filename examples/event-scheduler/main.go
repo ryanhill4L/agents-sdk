@@ -32,7 +32,7 @@ func main() {
 		log.Fatal("Agent validation failed:", err)
 	}
 
-	// Create OpenAI provider
+	// Create Anthropic provider
 	provider, err := providers.NewAnthropicProviderFromEnv()
 	if err != nil {
 		log.Printf("Failed to create Anthropic provider: %v", err)
@@ -55,9 +55,11 @@ func main() {
 	fmt.Println("=====================================")
 	fmt.Println("Try asking:")
 	fmt.Println("  - 'Show me all scheduled events'")
-	fmt.Println("  - 'Find scheduling conflicts for users'")
-	fmt.Println("  - 'Check for venue overlaps'")
+	fmt.Println("  - 'Find users with scheduling conflicts'")
+	fmt.Println("  - 'Check for venue booking conflicts'")
 	fmt.Println("  - 'What events is Alice attending?'")
+	fmt.Println("  - 'List all events at the Conference Room'")
+	fmt.Println("  - 'Show me events happening tomorrow'")
 	fmt.Println("\nType 'exit' to quit")
 
 	scanner := bufio.NewScanner(os.Stdin)

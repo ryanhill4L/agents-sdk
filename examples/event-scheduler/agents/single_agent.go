@@ -120,7 +120,7 @@ func detectVenueConflicts() (map[string]any, error) {
 // NewEventSchedulerAgent creates a single agent with all necessary tools
 func NewEventSchedulerAgent(db *sqlx.DB) *agents.Agent {
 	fmt.Println("🔍 DEBUG: Creating EventSchedulerAgent with tools...")
-	
+
 	// Set the global DB for the simple functions
 	globalDB = db
 
@@ -134,18 +134,18 @@ func NewEventSchedulerAgent(db *sqlx.DB) *agents.Agent {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create greet tool: %v", err))
 	}
-	
+
 	// Create database tools using the same pattern
 	queryTool, err := tools.NewFunctionTool("query_events", "Query the events database with SQL", queryEvents)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create query tool: %v", err))
 	}
-	
+
 	userOverlapTool, err := tools.NewFunctionTool("detect_user_overlaps", "Find users with conflicting event schedules", detectUserOverlaps)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create user overlap tool: %v", err))
 	}
-	
+
 	venueConflictTool, err := tools.NewFunctionTool("detect_venue_conflicts", "Find venues with overlapping events", detectVenueConflicts)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create venue conflict tool: %v", err))
@@ -154,19 +154,9 @@ func NewEventSchedulerAgent(db *sqlx.DB) *agents.Agent {
 	// Create the agent with all tools
 	fmt.Println("🔍 DEBUG: Creating agent with tools...")
 	agent := agents.NewAgent("Event Scheduler Assistant",
-		agents.WithInstructions(`You are an event scheduling assistant. You have tools to help with math, greetings, and database queries.
-
-For event-related questions, use these tools:
-- query_events: Query the database with SQL. For finding user's events, use: "SELECT e.name, e.date, e.location, e.duration_hours FROM events e JOIN user_schedules us ON e.id = us.event_id WHERE us.user_name = 'Username'"
-- detect_user_overlaps: Find users with scheduling conflicts  
-- detect_venue_conflicts: Find venues with overlapping bookings
-
-Database schema:
-- events table: id, name, date, location, duration_hours
-- user_schedules table: id, user_id, user_name, event_id, working_from, working_to
-
-Always use the appropriate tool to answer questions with proper SQL queries.`),
+		agents.WithInstructions(eventSchedulerInstructions),
 		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
+		agents.WithInstructions(eventSchedulerInstructions),
 		agents.WithTools(addTool, greetTool, queryTool, userOverlapTool, venueConflictTool),
 		agents.WithTemperature(0.7),
 	)
@@ -174,3 +164,37 @@ Always use the appropriate tool to answer questions with proper SQL queries.`),
 	fmt.Printf("🔍 DEBUG: Agent created successfully: %+v\n", agent)
 	return agent
 }
+
+const eventSchedulerInstructions = `System: Role and Objective:
+- Serve as an event scheduling assistant with access to a comprehensive event and user schedule database, providing precise answers by leveraging designated tools.
+
+Instructions:
+- Always utilize the available tools to fetch and verify information before responding.
+- Never answer user queries about events or schedules without querying the database or running overlap detection tools as appropriate.
+- Use only the tools listed in "Available Tools." For routine read-only tasks, call automatically; for destructive or irreversible actions (if applicable in future toolset), require explicit confirmation.
+
+Process Checklist:
+Begin with a concise checklist (3-7 bullets) of what you will do:
+1. Analyze and categorize the user request.
+2. State the purpose and minimal inputs for any significant tool call before invoking it.
+3. Invoke the appropriate tool(s) as determined by request type.
+4. Validate and summarize the tool output in 1-2 lines; if validation fails, clarify or self-correct.
+5. Format and present a concise, user-friendly response with relevant details (dates, times, user names, venues).
+6. Mark completion only after correct tool usage and required detail formatting.
+
+Tool Usage Guidelines:
+- For event or schedule information: Use 'query_events' with well-structured SQL queries to retrieve relevant data.
+- For checking user scheduling conflicts: Use 'detect_user_overlaps' to determine if any users are booked for overlapping events.
+- For checking venue booking conflicts: Use 'detect_venue_conflicts' to identify venues with overlapping event reservations.
+
+Available Tools:
+- 'get_event_count': Returns the total number of events in the database. For validation or basic metrics. No parameters required.
+- 'query_events': Perform specific SQL queries on the event database for detailed information or filtering results. Requires a SQL query string as input.
+- 'detect_user_overlaps': Detects users with multiple event commitments at the same time. No parameters required.
+- 'detect_venue_conflicts': Detects overlapping bookings for venues. No parameters required.
+
+Verbosity and Output:
+- Responses must be clear, concise, and grounded strictly in tool-generated data.
+- After each tool invocation, validate the result and proceed or self-correct as needed.
+- Mark the task as complete only after ensuring all relevant tool calls have been made and the answer includes all required details.
+`
