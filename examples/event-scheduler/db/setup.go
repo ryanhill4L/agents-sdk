@@ -17,12 +17,12 @@ type Event struct {
 }
 
 type UserSchedule struct {
-	ID          int    `db:"id"`
-	UserID      int    `db:"user_id"`
-	UserName    string `db:"user_name"`
-	EventID     int    `db:"event_id"`
-	WorkingFrom string `db:"working_from"`
-	WorkingTo   string `db:"working_to"`
+	ID          int       `db:"id"`
+	UserID      int       `db:"user_id"`
+	UserName    string    `db:"user_name"`
+	EventID     int       `db:"event_id"`
+	WorkingFrom time.Time `db:"working_from"`
+	WorkingTo   time.Time `db:"working_to"`
 }
 
 func InitDB() (*sqlx.DB, error) {
@@ -45,8 +45,8 @@ func InitDB() (*sqlx.DB, error) {
 		user_id INTEGER NOT NULL,
 		user_name TEXT NOT NULL,
 		event_id INTEGER NOT NULL,
-		working_from TEXT NOT NULL,
-		working_to TEXT NOT NULL,
+		working_from DATETIME NOT NULL,
+		working_to DATETIME NOT NULL,
 		FOREIGN KEY (event_id) REFERENCES events(id)
 	);`
 
@@ -66,6 +66,9 @@ func seedData(db *sqlx.DB) {
 		{Name: "Project Review", Date: time.Now().Add(24 * time.Hour), Location: "Conference Room B", Duration: 1},
 		{Name: "Client Presentation", Date: time.Now().Add(48 * time.Hour), Location: "Main Hall", Duration: 3},
 		{Name: "Training Session", Date: time.Now().Add(72 * time.Hour), Location: "Training Room", Duration: 4},
+		// Add some conflicting events for testing venue overlap detection
+		{Name: "Marketing Standup", Date: time.Now().Add(24*time.Hour + 30*time.Minute), Location: "Conference Room A", Duration: 1},
+		{Name: "Board Meeting", Date: time.Now().Add(48*time.Hour + 1*time.Hour), Location: "Main Hall", Duration: 2},
 	}
 
 	for _, e := range events {
@@ -75,13 +78,19 @@ func seedData(db *sqlx.DB) {
 		)
 	}
 
+	// Create time values for working hours
+	today := time.Now().Truncate(24 * time.Hour) // Start of today
+	
 	schedules := []UserSchedule{
-		{UserID: 1, UserName: "Alice", EventID: 1, WorkingFrom: "09:00", WorkingTo: "17:00"},
-		{UserID: 1, UserName: "Alice", EventID: 2, WorkingFrom: "09:00", WorkingTo: "17:00"},
-		{UserID: 2, UserName: "Bob", EventID: 1, WorkingFrom: "10:00", WorkingTo: "18:00"},
-		{UserID: 2, UserName: "Bob", EventID: 3, WorkingFrom: "10:00", WorkingTo: "18:00"},
-		{UserID: 3, UserName: "Charlie", EventID: 2, WorkingFrom: "08:00", WorkingTo: "16:00"},
-		{UserID: 3, UserName: "Charlie", EventID: 3, WorkingFrom: "08:00", WorkingTo: "16:00"},
+		{UserID: 1, UserName: "Alice", EventID: 1, WorkingFrom: today.Add(9 * time.Hour), WorkingTo: today.Add(17 * time.Hour)},
+		{UserID: 1, UserName: "Alice", EventID: 2, WorkingFrom: today.Add(9 * time.Hour), WorkingTo: today.Add(17 * time.Hour)},
+		{UserID: 2, UserName: "Bob", EventID: 1, WorkingFrom: today.Add(10 * time.Hour), WorkingTo: today.Add(18 * time.Hour)},
+		{UserID: 2, UserName: "Bob", EventID: 3, WorkingFrom: today.Add(10 * time.Hour), WorkingTo: today.Add(18 * time.Hour)},
+		{UserID: 3, UserName: "Charlie", EventID: 2, WorkingFrom: today.Add(8 * time.Hour), WorkingTo: today.Add(16 * time.Hour)},
+		{UserID: 3, UserName: "Charlie", EventID: 3, WorkingFrom: today.Add(8 * time.Hour), WorkingTo: today.Add(16 * time.Hour)},
+		// Add schedules for conflicting events
+		{UserID: 1, UserName: "Alice", EventID: 5, WorkingFrom: today.Add(9 * time.Hour), WorkingTo: today.Add(17 * time.Hour)}, // Alice in both Team Meeting and Marketing Standup
+		{UserID: 2, UserName: "Bob", EventID: 6, WorkingFrom: today.Add(10 * time.Hour), WorkingTo: today.Add(18 * time.Hour)},   // Bob in both Client Presentation and Board Meeting
 	}
 
 	for _, s := range schedules {

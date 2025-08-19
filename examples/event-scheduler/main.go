@@ -24,29 +24,30 @@ func main() {
 	}
 	defer database.Close()
 
-	// Create the secure triage agent with guardrails
-	triageAgent := localagents.NewSecureTriageAgent(database)
+	// Create the single event scheduler agent with all tools
+	schedulerAgent := localagents.NewEventSchedulerAgent(database)
 
 	// Validate agent
-	if err := triageAgent.Validate(); err != nil {
+	if err := schedulerAgent.Validate(); err != nil {
 		log.Fatal("Agent validation failed:", err)
 	}
 
 	// Create OpenAI provider
-	provider, err := providers.NewOpenAIProviderFromEnv()
+	provider, err := providers.NewAnthropicProviderFromEnv()
 	if err != nil {
-		log.Printf("Failed to create OpenAI provider: %v", err)
-		log.Println("Make sure OPENAI_API_KEY environment variable is set")
-		log.Println("export OPENAI_API_KEY='your-api-key-here'")
-		return
+		log.Printf("Failed to create Anthropic provider: %v", err)
+		log.Println("Make sure ANTHROPIC_API_KEY environment variable is set")
+		log.Println("export ANTHROPIC_API_KEY='your-api-key-here'")
+
+		// Return error - we need to set the ANTHROPIC_API_KEY environment variable
+		log.Fatal("Please set the ANTHROPIC_API_KEY environment variable")
 	}
 
 	// Create the runner
 	runner := agents.NewRunner(
 		agents.WithProvider(provider),
 		agents.WithTracer(tracing.NewConsoleTracer()),
-		agents.WithMaxTurns(5),
-		agents.WithParallelTools(true),
+		agents.WithMaxTurns(10),
 	)
 
 	// Interactive loop
@@ -57,7 +58,7 @@ func main() {
 	fmt.Println("  - 'Find scheduling conflicts for users'")
 	fmt.Println("  - 'Check for venue overlaps'")
 	fmt.Println("  - 'What events is Alice attending?'")
-	fmt.Println("\nType 'exit' to quit\n")
+	fmt.Println("\nType 'exit' to quit")
 
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -66,9 +67,9 @@ func main() {
 		if !scanner.Scan() {
 			break
 		}
-		
+
 		input := strings.TrimSpace(scanner.Text())
-		
+
 		if strings.ToLower(input) == "exit" || strings.ToLower(input) == "quit" {
 			break
 		}
@@ -79,23 +80,21 @@ func main() {
 
 		// Run the agent
 		ctx := context.Background()
-		result, err := runner.Run(ctx, triageAgent, input)
+		result, err := runner.Run(ctx, schedulerAgent, input)
 		if err != nil {
 			log.Printf("❌ Error: %v\n", err)
 			continue
 		}
 
 		fmt.Printf("\n🤖 %s\n\n", result.FinalOutput)
-		
+
 		// Show some metrics
-		if result.Metrics.ToolCalls > 0 || result.Metrics.Handoffs > 0 {
-			fmt.Printf("📊 Metrics: %d turns, %d tool calls, %d handoffs, %d tokens, %v duration\n\n",
-				result.Metrics.TotalTurns,
-				result.Metrics.ToolCalls,
-				result.Metrics.Handoffs,
-				result.Metrics.TotalTokens,
-				result.Metrics.Duration)
-		}
+		fmt.Printf("📊 Metrics: %d turns, %d tool calls, %d handoffs, %d tokens, %v duration\n",
+			result.Metrics.TotalTurns,
+			result.Metrics.ToolCalls,
+			result.Metrics.Handoffs,
+			result.Metrics.TotalTokens,
+			result.Metrics.Duration)
 	}
 
 	if err := scanner.Err(); err != nil {

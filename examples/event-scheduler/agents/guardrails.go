@@ -3,9 +3,6 @@ package agents
 import (
 	"fmt"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
-	"github.com/ryanhill4L/agents-sdk/pkg/agents"
 )
 
 // PrivacyGuardrail prevents access to sensitive information
@@ -40,21 +37,4 @@ func (p *PrivacyGuardrail) Validate(content string) error {
 	}
 
 	return nil
-}
-
-// NewSecureTriageAgent creates a triage agent with privacy guardrails
-func NewSecureTriageAgent(db *sqlx.DB) *agents.Agent {
-	triageAgent := NewTriageAgent(db)
-
-	// Add privacy guardrail
-	privacyGuardrail := NewPrivacyGuardrail()
-	triageAgent = agents.NewAgent(triageAgent.GetName(),
-		agents.WithInstructions(triageAgent.GetInstructions()),
-		agents.WithModel(triageAgent.GetModel()),
-		agents.WithHandoffs(triageAgent.Handoffs...),
-		agents.WithGuardrails(privacyGuardrail),
-		agents.WithTemperature(triageAgent.GetTemperature()),
-	)
-
-	return triageAgent
 }
