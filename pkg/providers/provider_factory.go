@@ -20,6 +20,8 @@ func (f *ProviderFactory) CreateProvider(providerType ProviderType, options ...P
 		return f.createOpenAIProvider(options...)
 	case ProviderTypeAnthropic:
 		return f.createAnthropicProvider(options...)
+	case ProviderTypeGemini:
+		return f.createGeminiProvider(options...)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, providerType.String())
 	}
@@ -53,6 +55,20 @@ func (f *ProviderFactory) createAnthropicProvider(options ...ProviderOption) (Pr
 	return NewAnthropicProvider(config)
 }
 
+// createGeminiProvider creates a Gemini provider with options
+func (f *ProviderFactory) createGeminiProvider(options ...ProviderOption) (Provider, error) {
+	config := NewGeminiConfig("")
+	
+	// Apply options
+	for _, opt := range options {
+		if err := opt.Apply(config); err != nil {
+			return nil, fmt.Errorf("failed to apply option: %w", err)
+		}
+	}
+	
+	return NewGeminiProvider(config)
+}
+
 // ProviderOption represents configuration options for providers
 type ProviderOption interface {
 	Apply(config interface{}) error
@@ -66,6 +82,8 @@ func (w WithAPIKey) Apply(config interface{}) error {
 	case *OpenAIConfig:
 		c.APIKey = string(w)
 	case *AnthropicConfig:
+		c.APIKey = string(w)
+	case *GeminiConfig:
 		c.APIKey = string(w)
 	default:
 		return fmt.Errorf("unsupported config type for API key option")
@@ -82,6 +100,8 @@ func (w WithBaseURL) Apply(config interface{}) error {
 		c.BaseURL = string(w)
 	case *AnthropicConfig:
 		c.BaseURL = string(w)
+	case *GeminiConfig:
+		c.BaseURL = string(w)
 	default:
 		return fmt.Errorf("unsupported config type for base URL option")
 	}
@@ -96,6 +116,8 @@ func (w WithDebug) Apply(config interface{}) error {
 	case *OpenAIConfig:
 		c.Debug = bool(w)
 	case *AnthropicConfig:
+		c.Debug = bool(w)
+	case *GeminiConfig:
 		c.Debug = bool(w)
 	default:
 		return fmt.Errorf("unsupported config type for debug option")
@@ -149,4 +171,16 @@ func NewOpenAIProviderWithKey(apiKey string) (Provider, error) {
 func NewAnthropicProviderWithKey(apiKey string) (Provider, error) {
 	factory := NewProviderFactory()
 	return factory.CreateProvider(ProviderTypeAnthropic, WithAPIKey(apiKey))
+}
+
+// NewGeminiProviderFromEnv creates a Gemini provider using environment variables
+func NewGeminiProviderFromEnv() (Provider, error) {
+	factory := NewProviderFactory()
+	return factory.CreateProvider(ProviderTypeGemini, WithAPIKey(os.Getenv("GEMINI_API_KEY")))
+}
+
+// NewGeminiProviderWithKey creates a Gemini provider with the given API key
+func NewGeminiProviderWithKey(apiKey string) (Provider, error) {
+	factory := NewProviderFactory()
+	return factory.CreateProvider(ProviderTypeGemini, WithAPIKey(apiKey))
 }

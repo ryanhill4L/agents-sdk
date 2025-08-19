@@ -11,6 +11,7 @@ type ProviderType int
 const (
 	ProviderTypeOpenAI ProviderType = iota
 	ProviderTypeAnthropic
+	ProviderTypeGemini
 )
 
 func (p ProviderType) String() string {
@@ -19,6 +20,8 @@ func (p ProviderType) String() string {
 		return "openai"
 	case ProviderTypeAnthropic:
 		return "anthropic"
+	case ProviderTypeGemini:
+		return "gemini"
 	default:
 		return "unknown"
 	}
@@ -62,6 +65,17 @@ type AnthropicConfig struct {
 	
 	// Beta features to enable (optional)
 	Beta []string
+}
+
+// GeminiConfig holds Google Gemini-specific configuration
+type GeminiConfig struct {
+	ProviderConfig
+	
+	// Project ID for Google Cloud (optional if using API key auth)
+	ProjectID string
+	
+	// Location for the model (optional)
+	Location string
 }
 
 // DefaultConfig returns a default configuration with common settings
@@ -108,6 +122,24 @@ func NewAnthropicConfig(apiKey string) *AnthropicConfig {
 	}
 }
 
+// NewGeminiConfig creates Gemini configuration with defaults
+func NewGeminiConfig(apiKey string) *GeminiConfig {
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	
+	return &GeminiConfig{
+		ProviderConfig: ProviderConfig{
+			APIKey:     apiKey,
+			Timeout:    30 * time.Second,
+			MaxRetries: 3,
+			Debug:      false,
+		},
+		ProjectID: os.Getenv("GOOGLE_CLOUD_PROJECT"),
+		Location:  "us-central1", // Default location
+	}
+}
+
 // Validate checks if the configuration is valid
 func (c *ProviderConfig) Validate() error {
 	if c.APIKey == "" {
@@ -129,5 +161,10 @@ func (c *OpenAIConfig) Validate() error {
 
 // Validate checks if the Anthropic configuration is valid
 func (c *AnthropicConfig) Validate() error {
+	return c.ProviderConfig.Validate()
+}
+
+// Validate checks if the Gemini configuration is valid
+func (c *GeminiConfig) Validate() error {
 	return c.ProviderConfig.Validate()
 }

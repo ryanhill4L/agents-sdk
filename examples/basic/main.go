@@ -54,12 +54,22 @@ func main() {
 		agents.WithTemperature(0.7),
 	)
 
+	geminiAgent := agents.NewAgent("Gemini Assistant",
+		agents.WithInstructions("You are a helpful assistant powered by Google Gemini."),
+		agents.WithModel("gemini-2.0-flash"),
+		agents.WithTools(addTool, greetTool),
+		agents.WithTemperature(0.7),
+	)
+
 	// Validate agents
 	if err := openaiAgent.Validate(); err != nil {
 		log.Fatal("OpenAI agent validation failed:", err)
 	}
 	if err := anthropicAgent.Validate(); err != nil {
 		log.Fatal("Anthropic agent validation failed:", err)
+	}
+	if err := geminiAgent.Validate(); err != nil {
+		log.Fatal("Gemini agent validation failed:", err)
 	}
 
 	// Test input
@@ -69,17 +79,20 @@ func main() {
 	// Check for API keys
 	openaiKey := os.Getenv("OPENAI_API_KEY")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	if openaiKey == "" && anthropicKey == "" {
+	if openaiKey == "" && anthropicKey == "" && geminiKey == "" {
 		fmt.Println("⚠️  Warning: No API keys found in environment variables.")
-		fmt.Println("Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY to test real API calls.")
+		fmt.Println("Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or GEMINI_API_KEY to test real API calls.")
 		fmt.Println("Using placeholder keys for demonstration...")
 		openaiKey = "sk-placeholder-key-demo"
 		anthropicKey = "sk-ant-placeholder-key-demo"
+		geminiKey = "placeholder-gemini-key-demo"
 	}
 
 	var openaiResult *agents.RunResult
 	var anthropicResult *agents.RunResult
+	var geminiResult *agents.RunResult
 
 	// Test OpenAI Provider
 	if openaiKey != "" {
@@ -151,14 +164,69 @@ func main() {
 		fmt.Println("⏭️  Skipping Anthropic - no API key provided")
 	}
 
-	// Compare results (if we have both)
-	if openaiResult != nil && anthropicResult != nil {
+	// Test Gemini Provider
+	if geminiKey != "" {
+		fmt.Println("\n🔷 Testing Gemini Provider")
+		fmt.Println("==========================")
+
+		geminiProvider, err := providers.NewGeminiProviderWithKey(geminiKey)
+		if err != nil {
+			log.Fatal("Failed to create Gemini provider:", err)
+		}
+
+		geminiRunner := agents.NewRunner(
+			agents.WithProvider(geminiProvider),
+			agents.WithTracer(tracing.NewConsoleTracer()),
+			agents.WithMaxTurns(3),
+		)
+
+		geminiResult, err = geminiRunner.Run(ctx, geminiAgent, input)
+		if err != nil {
+			fmt.Printf("⚠️  Gemini runner failed: %v\n", err)
+			fmt.Println("   This might be due to API quota, invalid model, or network issues.")
+		}
+
+		if geminiResult != nil {
+			fmt.Printf("📋 Agent: %s\n", geminiAgent.GetName())
+			fmt.Printf("🤖 Model: %s\n", geminiAgent.GetModel())
+			fmt.Printf("💬 Response: %s\n", geminiResult.FinalOutput)
+			fmt.Printf("📊 Tokens: %d\n", geminiResult.Metrics.TotalTokens)
+			fmt.Printf("⏱️  Duration: %v\n", geminiResult.Metrics.Duration)
+		}
+	} else {
+		fmt.Println("\n🔷 Gemini Provider")
+		fmt.Println("==========================")
+		fmt.Println("⏭️  Skipping Gemini - no API key provided")
+	}
+
+	// Compare results (if we have multiple)
+	resultCount := 0
+	if openaiResult != nil {
+		resultCount++
+	}
+	if anthropicResult != nil {
+		resultCount++
+	}
+	if geminiResult != nil {
+		resultCount++
+	}
+
+	if resultCount > 1 {
 		fmt.Println("\n📈 Comparison")
 		fmt.Println("=============")
-		fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n",
-			openaiResult.Metrics.Duration, anthropicResult.Metrics.Duration)
-		fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n",
-			openaiResult.Metrics.TotalTokens, anthropicResult.Metrics.TotalTokens)
+		
+		if openaiResult != nil {
+			fmt.Printf("OpenAI - Duration: %v, Tokens: %d\n",
+				openaiResult.Metrics.Duration, openaiResult.Metrics.TotalTokens)
+		}
+		if anthropicResult != nil {
+			fmt.Printf("Anthropic - Duration: %v, Tokens: %d\n",
+				anthropicResult.Metrics.Duration, anthropicResult.Metrics.TotalTokens)
+		}
+		if geminiResult != nil {
+			fmt.Printf("Gemini - Duration: %v, Tokens: %d\n",
+				geminiResult.Metrics.Duration, geminiResult.Metrics.TotalTokens)
+		}
 	}
 
 	fmt.Println("\n✅ Provider demonstration completed successfully!")
@@ -166,5 +234,6 @@ func main() {
 	fmt.Println("🔧 To enable real API calls:")
 	fmt.Println("   export OPENAI_API_KEY='your-openai-key'")
 	fmt.Println("   export ANTHROPIC_API_KEY='your-anthropic-key'")
-	fmt.Println("🚀 Both OpenAI and Anthropic integrations are now fully functional!")
+	fmt.Println("   export GEMINI_API_KEY='your-gemini-key'")
+	fmt.Println("🚀 OpenAI, Anthropic, and Gemini integrations are now fully functional!")
 }
