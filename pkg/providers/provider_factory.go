@@ -30,42 +30,42 @@ func (f *ProviderFactory) CreateProvider(providerType ProviderType, options ...P
 // createOpenAIProvider creates an OpenAI provider with options
 func (f *ProviderFactory) createOpenAIProvider(options ...ProviderOption) (Provider, error) {
 	config := NewOpenAIConfig("")
-	
+
 	// Apply options
 	for _, opt := range options {
 		if err := opt.Apply(config); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	
+
 	return NewOpenAIProvider(config)
 }
 
 // createAnthropicProvider creates an Anthropic provider with options
 func (f *ProviderFactory) createAnthropicProvider(options ...ProviderOption) (Provider, error) {
 	config := NewAnthropicConfig("")
-	
+
 	// Apply options
 	for _, opt := range options {
 		if err := opt.Apply(config); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	
+
 	return NewAnthropicProvider(config)
 }
 
 // createGeminiProvider creates a Gemini provider with options
 func (f *ProviderFactory) createGeminiProvider(options ...ProviderOption) (Provider, error) {
 	config := NewGeminiConfig("")
-	
+
 	// Apply options
 	for _, opt := range options {
 		if err := opt.Apply(config); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	
+
 	return NewGeminiProvider(config)
 }
 

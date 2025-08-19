@@ -42,6 +42,12 @@ run-json-example: ## Run the json example with API keys from .env
 	export $$(cat ../../.env | xargs) && \
 	go run main.go
 
+run-event-scheduler-example: ## Run the event scheduler example with environment variables from .env
+	@echo "Running event scheduler example with API keys from .env..."
+	@cd examples/event-scheduler && \
+	export $$(cat ../../.env | xargs) && \
+	go run main.go
+
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
 	go clean ./...
