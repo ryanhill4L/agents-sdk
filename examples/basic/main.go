@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/openai/openai-go"
 	"github.com/ryanhill4L/agents-sdk/pkg/agents"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
@@ -17,6 +19,7 @@ func add(a, b int) int {
 	return a + b
 }
 
+// Example tool: simple greeting
 func greet(name string) string {
 	return fmt.Sprintf("Hello, %s! Nice to meet you.", name)
 }
@@ -39,14 +42,14 @@ func main() {
 	// Create agents for different providers
 	openaiAgent := agents.NewAgent("OpenAI Assistant",
 		agents.WithInstructions("You are a helpful assistant powered by OpenAI."),
-		agents.WithModel("gpt-3.5-turbo"),
+		agents.WithModel(openai.ChatModelChatgpt4oLatest),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
 
 	anthropicAgent := agents.NewAgent("Anthropic Assistant",
 		agents.WithInstructions("You are a helpful assistant powered by Anthropic Claude."),
-		agents.WithModel("claude-3-5-sonnet-20241022"),
+		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
@@ -66,7 +69,7 @@ func main() {
 	// Check for API keys
 	openaiKey := os.Getenv("OPENAI_API_KEY")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
-	
+
 	if openaiKey == "" && anthropicKey == "" {
 		fmt.Println("⚠️  Warning: No API keys found in environment variables.")
 		fmt.Println("Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY to test real API calls.")
@@ -82,7 +85,7 @@ func main() {
 	if openaiKey != "" {
 		fmt.Println("\n🔥 Testing OpenAI Provider")
 		fmt.Println("==========================")
-		
+
 		openaiProvider, err := providers.NewOpenAIProviderWithKey(openaiKey)
 		if err != nil {
 			log.Fatal("Failed to create OpenAI provider:", err)
@@ -117,7 +120,7 @@ func main() {
 	if anthropicKey != "" {
 		fmt.Println("\n🟣 Testing Anthropic Provider")
 		fmt.Println("=============================")
-		
+
 		anthropicProvider, err := providers.NewAnthropicProviderWithKey(anthropicKey)
 		if err != nil {
 			log.Fatal("Failed to create Anthropic provider:", err)
@@ -152,12 +155,12 @@ func main() {
 	if openaiResult != nil && anthropicResult != nil {
 		fmt.Println("\n📈 Comparison")
 		fmt.Println("=============")
-		fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n", 
+		fmt.Printf("OpenAI Duration: %v vs Anthropic Duration: %v\n",
 			openaiResult.Metrics.Duration, anthropicResult.Metrics.Duration)
-		fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n", 
+		fmt.Printf("OpenAI Tokens: %d vs Anthropic Tokens: %d\n",
 			openaiResult.Metrics.TotalTokens, anthropicResult.Metrics.TotalTokens)
 	}
-	
+
 	fmt.Println("\n✅ Provider demonstration completed successfully!")
 	fmt.Println("💡 Note: These are real API implementations using official SDKs.")
 	fmt.Println("🔧 To enable real API calls:")

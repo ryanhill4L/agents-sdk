@@ -100,6 +100,100 @@ func (f *FunctionTool) goTypeToJSONType(t reflect.Type) string {
 	}
 }
 
+// convertToType converts a value from JSON types to the expected Go type
+func (f *FunctionTool) convertToType(val interface{}, targetType reflect.Type) (reflect.Value, error) {
+	if val == nil {
+		return reflect.Zero(targetType), nil
+	}
+
+	valType := reflect.TypeOf(val)
+	
+	// If types already match, return as-is
+	if valType == targetType {
+		return reflect.ValueOf(val), nil
+	}
+
+	// Handle common JSON->Go type conversions
+	switch targetType.Kind() {
+	case reflect.Int:
+		switch v := val.(type) {
+		case float64:
+			return reflect.ValueOf(int(v)), nil
+		case int:
+			return reflect.ValueOf(v), nil
+		case int64:
+			return reflect.ValueOf(int(v)), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to int", val)
+		}
+	case reflect.Int32:
+		switch v := val.(type) {
+		case float64:
+			return reflect.ValueOf(int32(v)), nil
+		case int:
+			return reflect.ValueOf(int32(v)), nil
+		case int32:
+			return reflect.ValueOf(v), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to int32", val)
+		}
+	case reflect.Int64:
+		switch v := val.(type) {
+		case float64:
+			return reflect.ValueOf(int64(v)), nil
+		case int:
+			return reflect.ValueOf(int64(v)), nil
+		case int64:
+			return reflect.ValueOf(v), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to int64", val)
+		}
+	case reflect.Float32:
+		switch v := val.(type) {
+		case float64:
+			return reflect.ValueOf(float32(v)), nil
+		case float32:
+			return reflect.ValueOf(v), nil
+		case int:
+			return reflect.ValueOf(float32(v)), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to float32", val)
+		}
+	case reflect.Float64:
+		switch v := val.(type) {
+		case float64:
+			return reflect.ValueOf(v), nil
+		case float32:
+			return reflect.ValueOf(float64(v)), nil
+		case int:
+			return reflect.ValueOf(float64(v)), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to float64", val)
+		}
+	case reflect.String:
+		switch v := val.(type) {
+		case string:
+			return reflect.ValueOf(v), nil
+		default:
+			return reflect.ValueOf(fmt.Sprintf("%v", val)), nil
+		}
+	case reflect.Bool:
+		switch v := val.(type) {
+		case bool:
+			return reflect.ValueOf(v), nil
+		default:
+			return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to bool", val)
+		}
+	default:
+		// For other types, try direct assignment if possible
+		valValue := reflect.ValueOf(val)
+		if valValue.Type().ConvertibleTo(targetType) {
+			return valValue.Convert(targetType), nil
+		}
+		return reflect.Zero(targetType), fmt.Errorf("cannot convert %T to %s", val, targetType.String())
+	}
+}
+
 // Name returns the tool name
 func (f *FunctionTool) Name() string {
 	return f.name
@@ -127,10 +221,14 @@ func (f *FunctionTool) Execute(ctx context.Context, args map[string]interface{})
 		if param.Implements(reflect.TypeOf((*context.Context)(nil)).Elem()) {
 			fnArgs = append(fnArgs, reflect.ValueOf(ctx))
 		} else {
-			// Get argument from map (simplified)
+			// Get argument from map and convert type if necessary
 			argName := fmt.Sprintf("arg%d", i)
 			if val, ok := args[argName]; ok {
-				fnArgs = append(fnArgs, reflect.ValueOf(val))
+				convertedVal, err := f.convertToType(val, param)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert argument %s: %w", argName, err)
+				}
+				fnArgs = append(fnArgs, convertedVal)
 			} else {
 				fnArgs = append(fnArgs, reflect.Zero(param))
 			}
