@@ -36,6 +36,12 @@ run-example-verbose: ## Run the basic example with verbose output
 	export $$(cat ../../.env | xargs) && \
 	TRACE=1 go run main.go
 
+run-json-example: ## Run the json example with API keys from .env
+	@echo "Running json example with API keys from .env..."
+	@cd examples/json && \
+	export $$(cat ../../.env | xargs) && \
+	go run main.go
+
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
 	go clean ./...
