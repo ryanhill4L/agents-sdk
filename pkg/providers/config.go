@@ -12,6 +12,7 @@ const (
 	ProviderTypeOpenAI ProviderType = iota
 	ProviderTypeAnthropic
 	ProviderTypeGemini
+	ProviderTypeOllama
 )
 
 func (p ProviderType) String() string {
@@ -22,6 +23,8 @@ func (p ProviderType) String() string {
 		return "anthropic"
 	case ProviderTypeGemini:
 		return "gemini"
+	case ProviderTypeOllama:
+		return "ollama"
 	default:
 		return "unknown"
 	}
@@ -48,10 +51,10 @@ type ProviderConfig struct {
 // OpenAIConfig holds OpenAI-specific configuration
 type OpenAIConfig struct {
 	ProviderConfig
-	
+
 	// Organization ID (optional)
 	Organization string
-	
+
 	// Project ID (optional)
 	Project string
 }
@@ -59,10 +62,10 @@ type OpenAIConfig struct {
 // AnthropicConfig holds Anthropic-specific configuration
 type AnthropicConfig struct {
 	ProviderConfig
-	
+
 	// Version specifies the API version (optional)
 	Version string
-	
+
 	// Beta features to enable (optional)
 	Beta []string
 }
@@ -70,10 +73,10 @@ type AnthropicConfig struct {
 // GeminiConfig holds Google Gemini-specific configuration
 type GeminiConfig struct {
 	ProviderConfig
-	
+
 	// Project ID for Google Cloud (optional if using API key auth)
 	ProjectID string
-	
+
 	// Location for the model (optional)
 	Location string
 }
@@ -92,7 +95,7 @@ func NewOpenAIConfig(apiKey string) *OpenAIConfig {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
-	
+
 	return &OpenAIConfig{
 		ProviderConfig: ProviderConfig{
 			APIKey:     apiKey,
@@ -110,7 +113,7 @@ func NewAnthropicConfig(apiKey string) *AnthropicConfig {
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
-	
+
 	return &AnthropicConfig{
 		ProviderConfig: ProviderConfig{
 			APIKey:     apiKey,
@@ -127,7 +130,7 @@ func NewGeminiConfig(apiKey string) *GeminiConfig {
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
-	
+
 	return &GeminiConfig{
 		ProviderConfig: ProviderConfig{
 			APIKey:     apiKey,
@@ -167,4 +170,42 @@ func (c *AnthropicConfig) Validate() error {
 // Validate checks if the Gemini configuration is valid
 func (c *GeminiConfig) Validate() error {
 	return c.ProviderConfig.Validate()
+}
+
+// OllamaConfig holds Ollama-specific configuration
+type OllamaConfig struct {
+	ProviderConfig
+
+	// Host specifies the Ollama server host (optional, defaults to http://localhost:11434)
+	Host string
+}
+
+// NewOllamaConfig creates Ollama configuration with defaults
+func NewOllamaConfig(host string) *OllamaConfig {
+	if host == "" {
+		host = os.Getenv("OLLAMA_HOST")
+		if host == "" {
+			host = "http://localhost:11434"
+		}
+	}
+
+	return &OllamaConfig{
+		ProviderConfig: ProviderConfig{
+			Timeout:    30 * time.Second,
+			MaxRetries: 3,
+			Debug:      false,
+		},
+		Host: host,
+	}
+}
+
+// Validate checks if the Ollama configuration is valid
+func (c *OllamaConfig) Validate() error {
+	if c.Timeout <= 0 {
+		return ErrInvalidTimeout
+	}
+	if c.MaxRetries < 0 {
+		return ErrInvalidMaxRetries
+	}
+	return nil
 }

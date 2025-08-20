@@ -61,6 +61,13 @@ func main() {
 		agents.WithTemperature(0.7),
 	)
 
+	ollamaAgent := agents.NewAgent("Ollama Assistant",
+		agents.WithInstructions("You are a helpful assistant powered by Ollama."),
+		agents.WithModel("qwen3:8b"),
+		agents.WithTools(addTool, greetTool),
+		agents.WithTemperature(0.7),
+	)
+
 	// Validate agents
 	if err := openaiAgent.Validate(); err != nil {
 		log.Fatal("OpenAI agent validation failed:", err)
@@ -71,6 +78,9 @@ func main() {
 	if err := geminiAgent.Validate(); err != nil {
 		log.Fatal("Gemini agent validation failed:", err)
 	}
+	if err := ollamaAgent.Validate(); err != nil {
+		log.Fatal("Ollama agent validation failed:", err)
+	}
 
 	// Test input
 	input := "Hello! Can you add 5 and 3 for me?"
@@ -80,19 +90,22 @@ func main() {
 	openaiKey := os.Getenv("OPENAI_API_KEY")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
+	ollamaHost := os.Getenv("OLLAMA_HOST")
 
-	if openaiKey == "" && anthropicKey == "" && geminiKey == "" {
+	if openaiKey == "" && anthropicKey == "" && geminiKey == "" && ollamaHost == "" {
 		fmt.Println("⚠️  Warning: No API keys found in environment variables.")
-		fmt.Println("Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or GEMINI_API_KEY to test real API calls.")
+		fmt.Println("Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, and/or OLLAMA_HOST to test real API calls.")
 		fmt.Println("Using placeholder keys for demonstration...")
 		openaiKey = "sk-placeholder-key-demo"
 		anthropicKey = "sk-ant-placeholder-key-demo"
 		geminiKey = "placeholder-gemini-key-demo"
+		ollamaHost = "http://localhost:11434"
 	}
 
 	var openaiResult *agents.RunResult
 	var anthropicResult *agents.RunResult
 	var geminiResult *agents.RunResult
+	var ollamaResult *agents.RunResult
 
 	// Test OpenAI Provider
 	if openaiKey != "" {
@@ -199,6 +212,41 @@ func main() {
 		fmt.Println("⏭️  Skipping Gemini - no API key provided")
 	}
 
+	// Test Ollama Provider
+	if ollamaHost != "" {
+		fmt.Println("\n🟦 Testing Ollama Provider")
+		fmt.Println("==========================")
+
+		ollamaProvider, err := providers.NewOllamaProviderWithHost(ollamaHost)
+		if err != nil {
+			log.Fatal("Failed to create Ollama provider:", err)
+		}
+
+		ollamaRunner := agents.NewRunner(
+			agents.WithProvider(ollamaProvider),
+			agents.WithTracer(tracing.NewConsoleTracer()),
+			agents.WithMaxTurns(3),
+		)
+
+		ollamaResult, err = ollamaRunner.Run(ctx, ollamaAgent, input)
+		if err != nil {
+			fmt.Printf("⚠️  Ollama runner failed: %v\n", err)
+			fmt.Println("   This might be due to server availability or network issues.")
+		}
+
+		if ollamaResult != nil {
+			fmt.Printf("📋 Agent: %s\n", ollamaAgent.GetName())
+			fmt.Printf("🤖 Model: %s\n", ollamaAgent.GetModel())
+			fmt.Printf("💬 Response: %s\n", ollamaResult.FinalOutput)
+			fmt.Printf("📊 Tokens: %d\n", ollamaResult.Metrics.TotalTokens)
+			fmt.Printf("⏱️  Duration: %v\n", ollamaResult.Metrics.Duration)
+		}
+	} else {
+		fmt.Println("\n🟦 Ollama Provider")
+		fmt.Println("==========================")
+		fmt.Println("⏭️  Skipping Ollama - no host provided")
+	}
+
 	// Compare results (if we have multiple)
 	resultCount := 0
 	if openaiResult != nil {
@@ -210,11 +258,14 @@ func main() {
 	if geminiResult != nil {
 		resultCount++
 	}
+	if ollamaResult != nil {
+		resultCount++
+	}
 
 	if resultCount > 1 {
 		fmt.Println("\n📈 Comparison")
 		fmt.Println("=============")
-		
+
 		if openaiResult != nil {
 			fmt.Printf("OpenAI - Duration: %v, Tokens: %d\n",
 				openaiResult.Metrics.Duration, openaiResult.Metrics.TotalTokens)
@@ -227,6 +278,10 @@ func main() {
 			fmt.Printf("Gemini - Duration: %v, Tokens: %d\n",
 				geminiResult.Metrics.Duration, geminiResult.Metrics.TotalTokens)
 		}
+		if ollamaResult != nil {
+			fmt.Printf("Ollama - Duration: %v, Tokens: %d\n",
+				ollamaResult.Metrics.Duration, ollamaResult.Metrics.TotalTokens)
+		}
 	}
 
 	fmt.Println("\n✅ Provider demonstration completed successfully!")
@@ -235,5 +290,6 @@ func main() {
 	fmt.Println("   export OPENAI_API_KEY='your-openai-key'")
 	fmt.Println("   export ANTHROPIC_API_KEY='your-anthropic-key'")
 	fmt.Println("   export GEMINI_API_KEY='your-gemini-key'")
-	fmt.Println("🚀 OpenAI, Anthropic, and Gemini integrations are now fully functional!")
+	fmt.Println("   export OLLAMA_HOST='http://localhost:11434'")
+	fmt.Println("🚀 OpenAI, Anthropic, Gemini, and Ollama integrations are now fully functional!")
 }
