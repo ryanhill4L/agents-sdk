@@ -29,33 +29,81 @@ func main() {
 	fmt.Println("==========================================")
 
 	// Create some tools
-	addTool, err := tools.NewFunctionTool("add", "Adds two numbers together", add)
+	addTool, err := tools.NewFunctionTool("add", "Performs addition of two integer numbers. Use this tool when you need to calculate the sum of two numeric values. Requires two integer parameters (a and b) and returns their mathematical sum.", add)
 	if err != nil {
 		log.Fatal("Failed to create add tool:", err)
 	}
 
-	greetTool, err := tools.NewFunctionTool("greet", "Greets a person by name", greet)
+	greetTool, err := tools.NewFunctionTool("greet", "Generates a personalized greeting message for a specified person. Use this tool to create friendly, welcoming messages. Requires a person's name as input and returns a formatted greeting string.", greet)
 	if err != nil {
 		log.Fatal("Failed to create greet tool:", err)
 	}
 
 	// Create agents for different providers
 	openaiAgent := agents.NewAgent("OpenAI Assistant",
-		agents.WithInstructions("You are a helpful assistant powered by OpenAI."),
+		agents.WithInstructions(`System: Role and Objective:
+- Serve as a helpful assistant powered by OpenAI with mathematical and greeting capabilities.
+
+Instructions:
+- Use the available tools to perform calculations and generate greetings as requested.
+- For mathematical operations, always use the 'add' tool for accurate results.
+- For greeting requests, use the 'greet' tool to generate personalized messages.
+- Provide clear, concise responses that directly address the user's request.
+
+Available Tools:
+- 'add': Performs addition of two integer numbers. Call this when the user asks for addition or sum calculations.
+- 'greet': Generates a personalized greeting. Call this when the user wants to greet someone or requests a welcome message.
+
+Process:
+1. Analyze the user's request to determine which tool(s) to use.
+2. Execute the appropriate tool with the correct parameters.
+3. Present the result in a clear, friendly manner.`),
 		agents.WithModel(openai.ChatModelChatgpt4oLatest),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
 
 	anthropicAgent := agents.NewAgent("Anthropic Assistant",
-		agents.WithInstructions("You are a helpful assistant powered by Anthropic Claude."),
+		agents.WithInstructions(`System: Role and Objective:
+- Serve as a helpful assistant powered by Anthropic Claude with mathematical and greeting capabilities.
+
+Instructions:
+- Use the available tools to perform calculations and generate greetings as requested.
+- For mathematical operations, always use the 'add' tool for accurate results.
+- For greeting requests, use the 'greet' tool to generate personalized messages.
+- Provide clear, concise responses that directly address the user's request.
+
+Available Tools:
+- 'add': Performs addition of two integer numbers. Call this when the user asks for addition or sum calculations.
+- 'greet': Generates a personalized greeting. Call this when the user wants to greet someone or requests a welcome message.
+
+Process:
+1. Analyze the user's request to determine which tool(s) to use.
+2. Execute the appropriate tool with the correct parameters.
+3. Present the result in a clear, friendly manner.`),
 		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
 	)
 
 	geminiAgent := agents.NewAgent("Gemini Assistant",
-		agents.WithInstructions("You are a helpful assistant powered by Google Gemini."),
+		agents.WithInstructions(`System: Role and Objective:
+- Serve as a helpful assistant powered by Google Gemini with mathematical and greeting capabilities.
+
+Instructions:
+- Use the available tools to perform calculations and generate greetings as requested.
+- For mathematical operations, always use the 'add' tool for accurate results.
+- For greeting requests, use the 'greet' tool to generate personalized messages.
+- Provide clear, concise responses that directly address the user's request.
+
+Available Tools:
+- 'add': Performs addition of two integer numbers. Call this when the user asks for addition or sum calculations.
+- 'greet': Generates a personalized greeting. Call this when the user wants to greet someone or requests a welcome message.
+
+Process:
+1. Analyze the user's request to determine which tool(s) to use.
+2. Execute the appropriate tool with the correct parameters.
+3. Present the result in a clear, friendly manner.`),
 		agents.WithModel("gemini-2.0-flash"),
 		agents.WithTools(addTool, greetTool),
 		agents.WithTemperature(0.7),
