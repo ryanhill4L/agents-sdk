@@ -48,6 +48,12 @@ run-event-scheduler-example: ## Run the event scheduler example with environment
 	export $$(cat ../../.env | xargs) && \
 	go run main.go
 
+run-customer-support-example: ## Run the customer support multi-agent example with environment variables from .env
+	@echo "Running customer support multi-agent example with API keys from .env..."
+	@cd examples/customer-support && \
+	export $$(cat ../../.env | xargs) && \
+	go run main.go
+
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
 	go clean ./...
