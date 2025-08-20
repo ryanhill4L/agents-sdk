@@ -125,28 +125,28 @@ func NewEventSchedulerAgent(db *sqlx.DB) *agents.Agent {
 	globalDB = db
 
 	// Create tools exactly like the basic example first
-	addTool, err := tools.NewFunctionTool("add", "Adds two numbers together", add)
+	addTool, err := tools.NewFunctionTool("add", "Performs mathematical addition of two integer numbers. Use this tool for any arithmetic sum calculations. Requires two integer parameters (a and b) and returns their sum.", add)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create add tool: %v", err))
 	}
 
-	greetTool, err := tools.NewFunctionTool("greet", "Greets a person by name", greet)
+	greetTool, err := tools.NewFunctionTool("greet", "Generates a personalized greeting message. Use this tool to create friendly welcome messages for specified individuals. Requires a person's name as input and returns a formatted greeting string.", greet)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create greet tool: %v", err))
 	}
 
 	// Create database tools using the same pattern
-	queryTool, err := tools.NewFunctionTool("query_events", "Query the events database with SQL", queryEvents)
+	queryTool, err := tools.NewFunctionTool("query_events", "Execute SQL queries against the events database to retrieve specific information. Use this tool for complex data retrieval, filtering, joining tables, or aggregating results. Requires a valid SQL query string. Returns query results as an array of row objects.", queryEvents)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create query tool: %v", err))
 	}
 
-	userOverlapTool, err := tools.NewFunctionTool("detect_user_overlaps", "Find users with conflicting event schedules", detectUserOverlaps)
+	userOverlapTool, err := tools.NewFunctionTool("detect_user_overlaps", "Identifies scheduling conflicts where users are double-booked for overlapping events. Use this tool to find all instances where a single user has multiple events scheduled at the same time. Returns conflict details including user names and conflicting events.", detectUserOverlaps)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create user overlap tool: %v", err))
 	}
 
-	venueConflictTool, err := tools.NewFunctionTool("detect_venue_conflicts", "Find venues with overlapping events", detectVenueConflicts)
+	venueConflictTool, err := tools.NewFunctionTool("detect_venue_conflicts", "Detects venue booking conflicts where multiple events are scheduled at the same location during overlapping time periods. Use this tool to identify venue availability issues. Returns all venue conflicts with event details and timing information.", detectVenueConflicts)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create venue conflict tool: %v", err))
 	}
