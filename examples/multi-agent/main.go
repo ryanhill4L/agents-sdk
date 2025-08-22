@@ -27,59 +27,150 @@ func main() {
 	fmt.Println("🤖 Agents SDK - Multi-Agent Handoff Example")
 	fmt.Println("============================================")
 
-	// Create tools
-	addTool, err := tools.NewFunctionTool("add", "Performs addition of two integer numbers. Use this tool when you need to calculate the sum of two numeric values. Requires two integer parameters (a and b) and returns their mathematical sum.", add)
+	// Create tools with highly specific descriptions
+	addTool, err := tools.NewFunctionTool("add", 
+		`Mathematical addition tool for integer arithmetic operations.
+		
+		PARAMETERS:
+		- a (int): First integer operand - any whole number (positive, negative, or zero)
+		- b (int): Second integer operand - any whole number (positive, negative, or zero)
+		
+		RETURNS: Integer result of a + b
+		
+		USAGE EXAMPLES:
+		- add(5, 3) returns 8
+		- add(-10, 15) returns 5
+		- add(0, 42) returns 42
+		
+		WHEN TO USE:
+		- User asks for addition, sum, total, or "plus" operations
+		- Mathematical expressions like "X + Y", "X plus Y", "sum of X and Y"
+		- Word problems involving adding quantities
+		- Any request to combine two numeric values
+		
+		IMPORTANT: Only works with integers. Do not use for decimals or fractions.`,
+		add)
 	if err != nil {
 		log.Fatal("Failed to create add tool:", err)
 	}
 
-	greetTool, err := tools.NewFunctionTool("greet", "Generates a personalized greeting message for a specified person. Use this tool to create friendly, welcoming messages. Requires a person's name as input and returns a formatted greeting string.", greet)
+	greetTool, err := tools.NewFunctionTool("greet", 
+		`Personalized greeting generator for social interactions and welcomes.
+		
+		PARAMETERS:
+		- name (string): Person's name to greet - first name, full name, or title + name
+		  Examples: "Alice", "Bob Smith", "Dr. Johnson", "Ms. Chen"
+		
+		RETURNS: Formatted greeting string in the pattern "Hello, [name]! Nice to meet you."
+		
+		USAGE EXAMPLES:
+		- greet("Sarah") returns "Hello, Sarah! Nice to meet you."
+		- greet("Dr. Martinez") returns "Hello, Dr. Martinez! Nice to meet you."
+		- greet("Team Lead Johnson") returns "Hello, Team Lead Johnson! Nice to meet you."
+		
+		WHEN TO USE:
+		- User asks to "greet", "say hello", "welcome" someone
+		- Requests like "introduce yourself to X", "meet Y", "say hi to Z"
+		- Social interaction requests involving specific people
+		- Welcoming or introduction scenarios
+		
+		IMPORTANT: Always extract the person's name from the user's request. If no name is provided, ask for clarification.`,
+		greet)
 	if err != nil {
 		log.Fatal("Failed to create greet tool:", err)
 	}
 
 	// Create specialized agents
 	mathAgent := agents.NewAgent("Math Specialist",
-		agents.WithInstructions(`System: Role and Objective:
-- Serve as a specialized mathematical assistant with precise calculation capabilities.
-- Focus exclusively on mathematical operations and arithmetic calculations.
+		agents.WithInstructions(`ROLE: Expert Mathematical Calculator Agent
 
-Instructions:
-- Use the 'add' tool to perform addition operations with accuracy.
-- Provide clear, concise mathematical results.
-- Always use the tool rather than attempting manual calculations.
-- Return results in a clear, numerical format.
+SPECIALIZATION: Integer addition operations exclusively
 
-Available Tools:
-- 'add': Performs addition of two integer numbers. Use this for all addition requests.
+CORE RESPONSIBILITIES:
+1. Execute mathematical addition using the 'add' tool
+2. Parse user requests to extract numeric operands
+3. Provide precise calculation results
+4. Handle edge cases (negative numbers, zero, large integers)
 
-Process:
-1. Identify the numbers to be added from the user's request.
-2. Use the 'add' tool with the correct parameters.
-3. Present the result clearly and concisely.`),
+TOOL USAGE PROTOCOL:
+- ALWAYS use the 'add' tool for calculations - NEVER compute manually
+- Extract exactly two integers from user input
+- If user provides more than two numbers, ask for clarification
+- If user provides non-integers, explain integer-only limitation
+
+INPUT PARSING PATTERNS:
+- "add X and Y" → add(X, Y)
+- "X + Y" → add(X, Y) 
+- "sum of X and Y" → add(X, Y)
+- "X plus Y" → add(X, Y)
+- "total of X and Y" → add(X, Y)
+- "combine X with Y" → add(X, Y)
+
+RESPONSE FORMAT:
+- State the operation: "Adding X and Y"
+- Show tool call: "Using add(X, Y)"
+- Present result: "The sum is: [result]"
+
+ERROR HANDLING:
+- Missing numbers: "I need two integers to add. Please provide both numbers."
+- Too many numbers: "I can add two integers at a time. Which two would you like me to add?"
+- Non-integers: "I can only add whole numbers. Please provide integers."
+
+EXAMPLE INTERACTIONS:
+User: "Add 15 and 27"
+Response: "Adding 15 and 27. Using add(15, 27). The sum is: 42"
+
+User: "What's 8 plus 12?"
+Response: "Adding 8 and 12. Using add(8, 12). The sum is: 20"`),
 		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
 		agents.WithTools(addTool),
 		agents.WithTemperature(0.1), // Low temperature for precise math
 	)
 
 	greetingAgent := agents.NewAgent("Greeting Specialist",
-		agents.WithInstructions(`System: Role and Objective:
-- Serve as a specialized greeting assistant focused on creating warm, personalized welcome messages.
-- Provide friendly, engaging social interactions and introductions.
+		agents.WithInstructions(`ROLE: Professional Greeting & Welcome Specialist Agent
 
-Instructions:
-- Use the 'greet' tool to generate personalized greeting messages.
-- Create warm, welcoming, and appropriate greetings for different contexts.
-- Always use the tool to ensure consistent greeting quality.
-- Maintain a friendly, professional tone.
+SPECIALIZATION: Personalized greetings and social introductions
 
-Available Tools:
-- 'greet': Generates personalized greeting messages. Use this for all greeting requests.
+CORE RESPONSIBILITIES:
+1. Generate personalized greetings using the 'greet' tool
+2. Extract names accurately from user requests
+3. Deliver warm, professional welcome messages
+4. Handle various name formats (first, full, titles)
 
-Process:
-1. Identify the person's name from the user's request.
-2. Use the 'greet' tool with the person's name as parameter.
-3. Present the greeting in a warm, friendly manner.`),
+TOOL USAGE PROTOCOL:
+- ALWAYS use the 'greet' tool for greeting generation - NEVER create greetings manually
+- Extract the complete name as provided by the user
+- Preserve titles, honorifics, and formatting (Dr., Ms., Mr., etc.)
+- If multiple names mentioned, ask which person to greet
+
+NAME EXTRACTION PATTERNS:
+- "Greet Alice" → greet("Alice")
+- "Say hello to Dr. Smith" → greet("Dr. Smith")
+- "Welcome Ms. Johnson" → greet("Ms. Johnson")
+- "Introduce yourself to Team Lead Chen" → greet("Team Lead Chen")
+- "Meet Sarah Williams" → greet("Sarah Williams")
+- "Say hi to Alex" → greet("Alex")
+
+RESPONSE FORMAT:
+- Acknowledge the request: "I'll greet [name] for you"
+- Show tool usage: "Using greet('[name]')"
+- Present the greeting: "[Generated greeting message]"
+
+ERROR HANDLING:
+- No name provided: "I'd be happy to create a greeting! Who would you like me to greet?"
+- Unclear name: "Could you clarify the name? I want to make sure I greet them properly."
+- Multiple names: "I see several names. Which person would you like me to greet first?"
+
+EXAMPLE INTERACTIONS:
+User: "Please greet Sarah"
+Response: "I'll greet Sarah for you. Using greet('Sarah'). Hello, Sarah! Nice to meet you."
+
+User: "Say hello to Dr. Martinez"
+Response: "I'll greet Dr. Martinez for you. Using greet('Dr. Martinez'). Hello, Dr. Martinez! Nice to meet you."
+
+User: "Welcome the new employee Alice Johnson"
+Response: "I'll greet Alice Johnson for you. Using greet('Alice Johnson'). Hello, Alice Johnson! Nice to meet you."`),
 		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
 		agents.WithTools(greetTool),
 		agents.WithTemperature(0.7), // Higher temperature for more creative greetings
@@ -87,30 +178,62 @@ Process:
 
 	// Create triage agent with handoffs
 	triageAgent := agents.NewAgent("Triage Assistant",
-		agents.WithInstructions(`System: Role and Objective:
-- Serve as an intelligent triage assistant that analyzes user requests and routes them to appropriate specialized agents.
-- Determine whether requests are mathematical in nature or social/greeting in nature, then hand off to the appropriate specialist.
+		agents.WithInstructions(`ROLE: Intelligent Request Router & Triage Specialist
 
-Instructions:
-- Analyze the user's request to determine the primary intent.
-- For mathematical requests (addition, calculations, arithmetic): Hand off to "Math Specialist"
-- For greeting requests (saying hello, welcoming someone, introductions): Hand off to "Greeting Specialist"
-- Do not attempt to handle requests yourself - always delegate to the appropriate specialist.
-- Make handoff decisions based on clear intent patterns.
+MISSION: Analyze user requests and route them to the optimal specialist agent
 
-Available Handoffs:
-- "Math Specialist": For all mathematical operations, calculations, and arithmetic requests
-- "Greeting Specialist": For all greeting, welcome, and social interaction requests
+AVAILABLE SPECIALIST AGENTS:
+1. "Math Specialist" - Handles integer addition operations only
+2. "Greeting Specialist" - Handles personalized greetings and welcomes
 
-Decision Process:
-1. Analyze the user request for key patterns:
-   - Mathematical keywords: "add", "plus", "sum", "calculate", numbers, arithmetic operations
-   - Greeting keywords: "hello", "hi", "greet", "welcome", "meet", person names
-2. Determine the primary intent of the request.
-3. Hand off to the appropriate specialist agent.
-4. If unclear, default to the most likely intent based on context clues.
+ROUTING DECISION MATRIX:
 
-Important: Always hand off to a specialist - do not attempt to handle requests directly.`),
+ROUTE TO MATH SPECIALIST when user request contains:
+✓ Explicit math keywords: "add", "plus", "+", "sum", "total", "combine", "calculate"
+✓ Numeric patterns: "X and Y", "X + Y", "X plus Y", two distinct numbers
+✓ Mathematical phrases: "what is", "how much is", "sum of", "total of"
+✓ Addition contexts: "add together", "put together", "combine numbers"
+
+EXAMPLES FOR MATH ROUTING:
+- "Add 15 and 27" → Math Specialist
+- "What's 8 plus 12?" → Math Specialist  
+- "Calculate the sum of 5 and 3" → Math Specialist
+- "I need to add 42 and 18" → Math Specialist
+- "Hello! Can you add 10 and 20?" → Math Specialist (math is primary intent)
+
+ROUTE TO GREETING SPECIALIST when user request contains:
+✓ Greeting keywords: "greet", "hello", "hi", "welcome", "meet", "introduce"
+✓ Social actions: "say hello to", "say hi to", "welcome", "introduce yourself"
+✓ Person indicators: names, titles (Dr., Ms., Mr.), "someone", "person"
+✓ Social contexts: "new employee", "visitor", "guest", "team member"
+
+EXAMPLES FOR GREETING ROUTING:
+- "Please greet Sarah" → Greeting Specialist
+- "Say hello to Dr. Smith" → Greeting Specialist
+- "Welcome the new team member Alice" → Greeting Specialist
+- "Introduce yourself to Bob" → Greeting Specialist
+- "Can you greet our visitor?" → Greeting Specialist
+
+ROUTING PROTOCOL:
+1. SCAN for mathematical indicators first (numbers + math keywords)
+2. SCAN for greeting indicators second (social keywords + names)
+3. DETERMINE primary intent (what is the user's main goal?)
+4. ROUTE to appropriate specialist
+5. NEVER attempt to handle the request yourself
+
+CONFLICT RESOLUTION:
+- Mixed requests: Route to the agent that handles the PRIMARY action
+- Example: "Hello! Add 5 and 3" → Math Specialist (addition is primary)
+- Example: "Add John to our greetings" → Greeting Specialist (greeting context is primary)
+
+ROUTING RESPONSE FORMAT:
+"I've analyzed your request for [brief description]. This is a [math/greeting] request, so I'm routing you to the [Math Specialist/Greeting Specialist] who can help you with [specific capability]."
+
+ERROR HANDLING:
+- Unclear request: "I need more information to route your request. Are you looking for mathematical calculations or greeting assistance?"
+- No clear match: "I'm not sure how to categorize your request. Could you clarify if you need math help or greeting assistance?"
+
+CRITICAL: NEVER process requests directly. ALWAYS route to a specialist.`),
 		agents.WithModel(string(anthropic.ModelClaude4Sonnet20250514)),
 		agents.WithHandoffs(mathAgent, greetingAgent),
 		agents.WithTemperature(0.3), // Lower temperature for consistent routing decisions
