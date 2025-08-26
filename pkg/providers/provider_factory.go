@@ -22,6 +22,8 @@ func (f *ProviderFactory) CreateProvider(providerType ProviderType, options ...P
 		return f.createAnthropicProvider(options...)
 	case ProviderTypeGemini:
 		return f.createGeminiProvider(options...)
+	case ProviderTypeOllama:
+		return f.createOllamaProvider(options...)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProvider, providerType.String())
 	}
@@ -102,6 +104,8 @@ func (w WithBaseURL) Apply(config interface{}) error {
 		c.BaseURL = string(w)
 	case *GeminiConfig:
 		c.BaseURL = string(w)
+	case *OllamaConfig:
+		c.Host = string(w)
 	default:
 		return fmt.Errorf("unsupported config type for base URL option")
 	}
@@ -118,6 +122,8 @@ func (w WithDebug) Apply(config interface{}) error {
 	case *AnthropicConfig:
 		c.Debug = bool(w)
 	case *GeminiConfig:
+		c.Debug = bool(w)
+	case *OllamaConfig:
 		c.Debug = bool(w)
 	default:
 		return fmt.Errorf("unsupported config type for debug option")
@@ -183,4 +189,30 @@ func NewGeminiProviderFromEnv() (Provider, error) {
 func NewGeminiProviderWithKey(apiKey string) (Provider, error) {
 	factory := NewProviderFactory()
 	return factory.CreateProvider(ProviderTypeGemini, WithAPIKey(apiKey))
+}
+
+// createOllamaProvider creates an Ollama provider with options
+func (f *ProviderFactory) createOllamaProvider(options ...ProviderOption) (Provider, error) {
+	config := NewOllamaConfig("")
+
+	// Apply options
+	for _, opt := range options {
+		if err := opt.Apply(config); err != nil {
+			return nil, fmt.Errorf("failed to apply option: %w", err)
+		}
+	}
+
+	return NewOllamaProvider(config.Host)
+}
+
+// NewOllamaProviderFromEnv creates an Ollama provider using environment variables
+func NewOllamaProviderFromEnv() (Provider, error) {
+	factory := NewProviderFactory()
+	return factory.CreateProvider(ProviderTypeOllama)
+}
+
+// NewOllamaProviderWithHost creates an Ollama provider with the given host
+func NewOllamaProviderWithHost(host string) (Provider, error) {
+	factory := NewProviderFactory()
+	return factory.CreateProvider(ProviderTypeOllama, WithBaseURL(host))
 }
