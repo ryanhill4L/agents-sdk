@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # Jaeger all-in-one for development and testing
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: agents-sdk-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "14268:14268"   # Jaeger collector HTTP
+      - "14250:14250"   # Jaeger collector gRPC
+      - "4317:4317"     # OTLP gRPC receiver
+      - "4318:4318"     # OTLP HTTP receiver
+    networks:
+      - observability
+
+  # OpenTelemetry Collector (optional, for more advanced setups)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: agents-sdk-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"     # OTLP gRPC receiver
+      - "4318:4318"     # OTLP HTTP receiver
+      - "8888:8888"     # Prometheus metrics
+      - "8889:8889"     # Prometheus metrics (internal)
+      - "13133:13133"   # health_check
+    depends_on:
+      - jaeger
+    networks:
+      - observability
+    profiles:
+      - advanced
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: agents-sdk-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - observability
+    profiles:
+      - advanced
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: agents-sdk-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - observability
+    profiles:
+      - advanced
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  grafana-storage:

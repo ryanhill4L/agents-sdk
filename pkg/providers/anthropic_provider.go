@@ -9,18 +9,26 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/shared/constant"
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 )
 
 // AnthropicProvider implements the Provider interface using Anthropic's Claude API
 type AnthropicProvider struct {
 	config *AnthropicConfig
 	client *anthropic.Client
+	logger logging.Logger
 }
 
 // NewAnthropicProvider creates a new Anthropic provider instance
 func NewAnthropicProvider(config *AnthropicConfig) (*AnthropicProvider, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Initialize logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.NewConsoleLogger(config.LogLevel, config.Verbose)
 	}
 
 	// Initialize Anthropic client with official SDK
@@ -34,14 +42,55 @@ func NewAnthropicProvider(config *AnthropicConfig) (*AnthropicProvider, error) {
 	
 	client := anthropic.NewClient(opts...)
 
-	return &AnthropicProvider{
+	provider := &AnthropicProvider{
 		config: config,
 		client: &client,
-	}, nil
+		logger: logger.With(logging.String("provider", "anthropic")),
+	}
+
+	provider.logger.Info(context.Background(), "Anthropic provider initialized", 
+		logging.String("base_url", config.BaseURL),
+		logging.String("version", config.Version),
+		logging.String("log_level", config.LogLevel.String()),
+		logging.Bool("verbose", config.Verbose))
+
+	return provider, nil
 }
 
 // Complete implements the Provider interface for Anthropic
 func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages []Message, tools []ToolDefinition) (*Completion, error) {
+	startTime := time.Now()
+	requestID := logging.NewRequestID()
+	
+	// Add request context to logger
+	ctx = logging.WithRequestID(ctx, requestID)
+	logger := p.logger.With(
+		logging.String("request_id", requestID),
+		logging.String("agent", agent.GetName()),
+		logging.String("model", agent.GetModel()),
+		logging.Int("input_messages", len(messages)),
+		logging.Int("available_tools", len(tools)),
+	)
+	
+	logger.Info(ctx, "Starting Anthropic completion request")
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Request details",
+			logging.Float64("temperature", float64(agent.GetTemperature())),
+			logging.Int("max_tokens", agent.GetMaxTokens()),
+			logging.Float64("top_p", float64(agent.GetTopP())),
+		)
+		
+		// Log message content in verbose mode
+		for i, msg := range messages {
+			logger.Debug(ctx, "Input message",
+				logging.Int("index", i),
+				logging.String("role", msg.Role),
+				logging.String("content", msg.Content[:min(200, len(msg.Content))]), // Truncate for readability
+			)
+		}
+	}
+	
 	// Convert messages to Anthropic format
 	var systemPrompt *string
 	claudeMessages := make([]anthropic.MessageParam, 0, len(messages))
@@ -49,6 +98,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages 
 	// Extract system instructions
 	if instructions := agent.GetInstructions(); instructions != "" {
 		systemPrompt = &instructions
+		logger.Debug(ctx, "Added system instructions", logging.Int("length", len(instructions)))
 	}
 	
 	// Convert messages (skip system messages as they're handled separately)
@@ -122,6 +172,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages 
 	
 	// Convert tools to Anthropic format
 	if len(tools) > 0 {
+		logger.Debug(ctx, "Converting tools to Anthropic format", logging.Int("tool_count", len(tools)))
 		anthropicTools := make([]anthropic.ToolUnionParam, 0, len(tools))
 		for _, tool := range tools {
 			// Convert our schema to Anthropic's expected format
@@ -139,11 +190,28 @@ func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages 
 		params.Tools = anthropicTools
 	}
 	
+	logger.Debug(ctx, "Making Anthropic API request")
+	
 	// Make API call
 	response, err := p.client.Messages.New(ctx, params)
+	requestDuration := time.Since(startTime)
+	
 	if err != nil {
+		logger.Error(ctx, "Anthropic API call failed", 
+			logging.Error(err),
+			logging.Duration("duration", requestDuration),
+		)
 		return nil, fmt.Errorf("Anthropic API call failed: %w", err)
 	}
+	
+	// Log API response details
+	logger.Info(ctx, "Anthropic API request completed",
+		logging.Duration("duration", requestDuration),
+		logging.Int("prompt_tokens", int(response.Usage.InputTokens)),
+		logging.Int("completion_tokens", int(response.Usage.OutputTokens)),
+		logging.Int("total_tokens", int(response.Usage.InputTokens + response.Usage.OutputTokens)),
+		logging.String("stop_reason", string(response.StopReason)),
+	)
 	
 	// Extract content and tool calls from response
 	var content string
@@ -162,7 +230,11 @@ func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages 
 			// Parse the JSON input to map[string]interface{}
 			var inputMap map[string]interface{}
 			if err := json.Unmarshal(contentBlock.Input, &inputMap); err != nil {
-				// If unmarshaling fails, skip this tool call
+				logger.Warn(ctx, "Failed to parse tool call input", 
+					logging.Error(err),
+					logging.String("tool_id", contentBlock.ID),
+					logging.String("tool_name", contentBlock.Name),
+				)
 				continue
 			}
 			toolCalls = append(toolCalls, ToolCall{
@@ -171,6 +243,17 @@ func (p *AnthropicProvider) Complete(ctx context.Context, agent Agent, messages 
 				Arguments: inputMap,
 			})
 		}
+	}
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Response message",
+			logging.String("content", content[:min(200, len(content))]),
+			logging.Int("tool_calls", len(toolCalls)),
+		)
+	}
+	
+	if len(toolCalls) > 0 {
+		logger.Debug(ctx, "Processed tool calls", logging.Int("count", len(toolCalls)))
 	}
 	
 	// Convert response

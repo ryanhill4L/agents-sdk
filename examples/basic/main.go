@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/openai/openai-go"
@@ -27,6 +28,18 @@ func greet(name string) string {
 func main() {
 	fmt.Println("🤖 Agents SDK - Provider Comparison Example")
 	fmt.Println("==========================================")
+
+	// Initialize logging and tracing
+	fmt.Println("⚙️  Initializing observability...")
+	if err := tracing.InitGlobalTracer(); err != nil {
+		fmt.Printf("Warning: Failed to initialize tracer: %v\n", err)
+	}
+
+	// Show current logging configuration
+	fmt.Printf("📊 Logging Configuration:\n")
+	fmt.Printf("   - Log Level: %s (set AGENTS_LOG_LEVEL to change)\n", os.Getenv("AGENTS_LOG_LEVEL"))
+	fmt.Printf("   - Verbose Mode: %s (set AGENTS_VERBOSE=true to enable)\n", os.Getenv("AGENTS_VERBOSE"))
+	fmt.Printf("   - Trace Enabled: %s (set AGENTS_TRACE_ENABLED=true to enable)\n", os.Getenv("AGENTS_TRACE_ENABLED"))
 
 	// Create some tools
 	addTool, err := tools.NewFunctionTool("add", "Performs addition of two integer numbers. Use this tool when you need to calculate the sum of two numeric values. Requires two integer parameters (a and b) and returns their mathematical sum.", add)
@@ -283,5 +296,16 @@ Process:
 	fmt.Println("   export OPENAI_API_KEY='your-openai-key'")
 	fmt.Println("   export ANTHROPIC_API_KEY='your-anthropic-key'")
 	fmt.Println("   export GEMINI_API_KEY='your-gemini-key'")
-	fmt.Println("🚀 OpenAI, Anthropic, and Gemini integrations are now fully functional!")
+	fmt.Println("🔍 To enable detailed logging and tracing:")
+	fmt.Println("   export AGENTS_LOG_LEVEL=debug")
+	fmt.Println("   export AGENTS_VERBOSE=true")
+	fmt.Println("   export AGENTS_TRACE_ENABLED=true")
+	fmt.Println("🚀 OpenAI, Anthropic, and Gemini integrations are now fully functional with observability!")
+
+	// Shutdown tracing
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := tracing.ShutdownGlobalTracer(shutdownCtx); err != nil {
+		log.Printf("Warning: Failed to shutdown tracer: %v", err)
+	}
 }

@@ -1,0 +1,60 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: agents-sdk
+        action: upsert
+      - key: deployment.environment
+        value: development
+        action: upsert
+
+  # Sample traces for high-volume scenarios
+  probabilistic_sampler:
+    sampling_percentage: 100.0  # Sample 100% for demo
+
+exporters:
+  # Export to Jaeger
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+  # Export to console for debugging
+  logging:
+    loglevel: info
+
+  # Export metrics to Prometheus
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch, probabilistic_sampler]
+      exporters: [jaeger, logging]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [prometheus, logging]
+
+  extensions: []
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888

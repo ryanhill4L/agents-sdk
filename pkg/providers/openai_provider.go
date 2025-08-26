@@ -7,18 +7,26 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 )
 
 // OpenAIProvider implements the Provider interface using OpenAI's API
 type OpenAIProvider struct {
 	config *OpenAIConfig
 	client *openai.Client
+	logger logging.Logger
 }
 
 // NewOpenAIProvider creates a new OpenAI provider instance
 func NewOpenAIProvider(config *OpenAIConfig) (*OpenAIProvider, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Initialize logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.NewConsoleLogger(config.LogLevel, config.Verbose)
 	}
 
 	// Initialize OpenAI client
@@ -40,20 +48,63 @@ func NewOpenAIProvider(config *OpenAIConfig) (*OpenAIProvider, error) {
 
 	client := openai.NewClient(opts...)
 
-	return &OpenAIProvider{
+	provider := &OpenAIProvider{
 		config: config,
 		client: &client,
-	}, nil
+		logger: logger.With(logging.String("provider", "openai")),
+	}
+
+	provider.logger.Info(context.Background(), "OpenAI provider initialized", 
+		logging.String("base_url", config.BaseURL),
+		logging.Bool("has_organization", config.Organization != ""),
+		logging.Bool("has_project", config.Project != ""),
+		logging.String("log_level", config.LogLevel.String()),
+		logging.Bool("verbose", config.Verbose))
+
+	return provider, nil
 }
 
 // Complete implements the Provider interface for OpenAI
 func (p *OpenAIProvider) Complete(ctx context.Context, agent Agent, messages []Message, tools []ToolDefinition) (*Completion, error) {
+	startTime := time.Now()
+	requestID := logging.NewRequestID()
+	
+	// Add request context to logger
+	ctx = logging.WithRequestID(ctx, requestID)
+	logger := p.logger.With(
+		logging.String("request_id", requestID),
+		logging.String("agent", agent.GetName()),
+		logging.String("model", agent.GetModel()),
+		logging.Int("input_messages", len(messages)),
+		logging.Int("available_tools", len(tools)),
+	)
+	
+	logger.Info(ctx, "Starting OpenAI completion request")
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Request details",
+			logging.Float64("temperature", float64(agent.GetTemperature())),
+			logging.Int("max_tokens", agent.GetMaxTokens()),
+			logging.Float64("top_p", float64(agent.GetTopP())),
+		)
+		
+		// Log message content in verbose mode
+		for i, msg := range messages {
+			logger.Debug(ctx, "Input message",
+				logging.Int("index", i),
+				logging.String("role", msg.Role),
+				logging.String("content", msg.Content[:min(200, len(msg.Content))]), // Truncate for readability
+			)
+		}
+	}
+	
 	// Convert messages to OpenAI format
 	chatMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
 	
 	// Add system message if agent has instructions
 	if instructions := agent.GetInstructions(); instructions != "" {
 		chatMessages = append(chatMessages, openai.SystemMessage(instructions))
+		logger.Debug(ctx, "Added system instructions", logging.Int("length", len(instructions)))
 	}
 	
 	// Convert messages
@@ -86,22 +137,48 @@ func (p *OpenAIProvider) Complete(ctx context.Context, agent Agent, messages []M
 	// Note: Tool calling implementation is disabled for now due to OpenAI SDK complexity
 	// The basic chat completion will work without tools
 	if len(tools) > 0 {
+		logger.Debug(ctx, "Tools available but not yet implemented", logging.Int("tool_count", len(tools)))
 		// TODO: Implement proper tool calling once SDK issues are resolved
 		// For now, we'll proceed without tools to get the basic functionality working
 	}
 	
+	logger.Debug(ctx, "Making OpenAI API request")
+	
 	// Make API call
 	completion, err := p.client.Chat.Completions.New(ctx, params)
+	requestDuration := time.Since(startTime)
+	
 	if err != nil {
+		logger.Error(ctx, "OpenAI API call failed", 
+			logging.Error(err),
+			logging.Duration("duration", requestDuration),
+		)
 		return nil, fmt.Errorf("OpenAI API call failed: %w", err)
 	}
 	
 	if len(completion.Choices) == 0 {
+		logger.Error(ctx, "No completion choices returned from OpenAI")
 		return nil, fmt.Errorf("no completion choices returned from OpenAI")
 	}
 	
 	choice := completion.Choices[0]
 	message := choice.Message
+	
+	// Log API response details
+	logger.Info(ctx, "OpenAI API request completed",
+		logging.Duration("duration", requestDuration),
+		logging.Int("prompt_tokens", int(completion.Usage.PromptTokens)),
+		logging.Int("completion_tokens", int(completion.Usage.CompletionTokens)),
+		logging.Int("total_tokens", int(completion.Usage.TotalTokens)),
+		logging.String("finish_reason", string(choice.FinishReason)),
+	)
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Response message",
+			logging.String("content", message.Content[:min(200, len(message.Content))]),
+			logging.Int("tool_calls", len(message.ToolCalls)),
+		)
+	}
 	
 	// Convert response
 	result := &Completion{
@@ -132,9 +209,18 @@ func (p *OpenAIProvider) Complete(ctx context.Context, agent Agent, messages []M
 			}
 		}
 		result.ToolCalls = toolCalls
+		logger.Debug(ctx, "Processed tool calls", logging.Int("count", len(toolCalls)))
 	}
 	
 	return result, nil
+}
+
+// Helper function to get minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 

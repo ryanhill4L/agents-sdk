@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 	"github.com/ryanhill4L/agents-sdk/pkg/memory"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
@@ -125,86 +126,57 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 	metrics := RunMetrics{}
 	currentAgent := agent
 
+	// Add trace context
+	traceID := ctx.TraceID
+	if traceID == "" {
+		traceID = uuid.New().String()
+		ctx.TraceID = traceID
+	}
+	
+	// Add logging context
+	ctx.Context = logging.WithTraceID(ctx.Context, traceID)
+
 	for turn := 0; turn < ctx.MaxTurns; turn++ {
 		ctx.CurrentTurn = turn
 
-		// Check context cancellation
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context cancelled: %w", err)
-		}
-
-		// Validate input with guardrails
-		if err := r.validateGuardrails(currentAgent, messages); err != nil {
-			return nil, fmt.Errorf("guardrail validation failed: %w", err)
-		}
-
-		// Get LLM completion
-		toolDefs := convertToolsToProviders(currentAgent.Tools)
-		completion, err := r.provider.Complete(ctx.Context, currentAgent, messagesToProviders(messages), toolDefs)
-		if err != nil {
-			return nil, fmt.Errorf("completion failed: %w", err)
-		}
-
-		metrics.TotalTokens += completion.Usage.TotalTokens
-		messages = append(messages, messageFromProviders(completion.Message))
-
-		// Check for final output
-		if currentAgent.OutputType != nil && completion.StructuredOutput != nil {
-			metrics.Duration = time.Since(startTime)
-			metrics.TotalTurns = turn + 1
-
-			return &RunResult{
-				FinalOutput: completion.StructuredOutput,
-				Messages:    messages,
-				Agent:       currentAgent,
-				Metrics:     metrics,
-			}, nil
-		}
-
-		// Handle handoffs
-		if completion.Handoff != nil {
-			metrics.Handoffs++
-
-			newAgent, ok := currentAgent.GetHandoff(completion.Handoff.TargetAgent)
-			if !ok {
-				return nil, fmt.Errorf("handoff agent not found: %s", completion.Handoff.TargetAgent)
+		// Start turn tracing
+		err := tracing.TraceAgentOperation(ctx.Context, currentAgent.GetName(), "turn", func(turnCtx context.Context) error {
+			// Check context cancellation
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("context cancelled: %w", err)
 			}
 
-			currentAgent = newAgent
-			continue
-		}
+			// Validate input with guardrails
+			if err := r.validateGuardrails(currentAgent, messages); err != nil {
+				return fmt.Errorf("guardrail validation failed: %w", err)
+			}
 
-		// Handle tool calls
-		if len(completion.ToolCalls) > 0 {
-			metrics.ToolCalls += len(completion.ToolCalls)
-
-			toolResponses, err := r.executeTools(ctx, currentAgent, toolCallsFromProviders(completion.ToolCalls))
+			// Get LLM completion with enhanced tracing
+			toolDefs := convertToolsToProviders(currentAgent.Tools)
+			
+			var completion *providers.Completion
+			err := tracing.TraceProviderOperation(turnCtx, getProviderName(r.provider), "complete", func(providerCtx context.Context) error {
+				var err error
+				completion, err = r.provider.Complete(providerCtx, currentAgent, messagesToProviders(messages), toolDefs)
+				return err
+			})
+			
 			if err != nil {
-				return nil, fmt.Errorf("tool execution failed: %w", err)
+				return fmt.Errorf("completion failed: %w", err)
 			}
 
-			// Add tool responses as messages
-			for _, resp := range toolResponses {
-				messages = append(messages, Message{
-					Role:      "tool",
-					Content:   fmt.Sprintf("%v", resp.Content),
-					Timestamp: time.Now(),
-					Metadata: map[string]interface{}{
-						"tool_call_id": resp.ToolCallID,
-					},
-				})
-			}
-
-			continue
+			// Process completion results
+			return r.processCompletion(ctx, currentAgent, completion, &messages, &metrics)
+		})
+		
+		if err != nil {
+			return nil, err
 		}
 
-		// If no tools, handoffs, or structured output, we have final output
-		if currentAgent.OutputType == nil {
-			metrics.Duration = time.Since(startTime)
-			metrics.TotalTurns = turn + 1
-
+		// Check if we got a completion result and need to exit the loop
+		if r.shouldCompleteExecution(currentAgent, &metrics, turn+1, startTime, messages) {
 			return &RunResult{
-				FinalOutput: completion.Message.Content,
+				FinalOutput: r.getFinalOutput(currentAgent, messages),
 				Messages:    messages,
 				Agent:       currentAgent,
 				Metrics:     metrics,
@@ -439,4 +411,100 @@ func RunAsync(ctx context.Context, agent *Agent, input string, opts ...RunnerOpt
 	}()
 
 	return resultChan
+}
+
+// Helper functions for enhanced tracing and execution
+
+// getProviderName extracts the provider name from a provider instance
+func getProviderName(provider providers.Provider) string {
+	switch provider.(type) {
+	case *providers.OpenAIProvider:
+		return "openai"
+	case *providers.AnthropicProvider:
+		return "anthropic"
+	case *providers.GeminiProvider:
+		return "gemini"
+	default:
+		return "unknown"
+	}
+}
+
+// processCompletion handles the completion result processing
+func (r *Runner) processCompletion(ctx *RunContext, agent *Agent, completion *providers.Completion, messages *[]Message, metrics *RunMetrics) error {
+	// Update metrics
+	metrics.TotalTokens += completion.Usage.TotalTokens
+	*messages = append(*messages, messageFromProviders(completion.Message))
+
+	// Check for structured output
+	if agent.OutputType != nil && completion.StructuredOutput != nil {
+		return nil // Signal completion
+	}
+
+	// Handle handoffs
+	if completion.Handoff != nil {
+		metrics.Handoffs++
+		// Note: Handoff logic would need to be implemented here
+		return fmt.Errorf("handoff functionality not yet implemented")
+	}
+
+	// Handle tool calls
+	if len(completion.ToolCalls) > 0 {
+		metrics.ToolCalls += len(completion.ToolCalls)
+
+		var toolResponses []ToolResponse
+		err := tracing.TraceOperation(ctx.Context, "tool_execution", func(toolCtx context.Context) error {
+			var err error
+			toolResponses, err = r.executeTools(ctx, agent, toolCallsFromProviders(completion.ToolCalls))
+			return err
+		})
+		
+		if err != nil {
+			return fmt.Errorf("tool execution failed: %w", err)
+		}
+
+		// Add tool responses as messages
+		for _, resp := range toolResponses {
+			*messages = append(*messages, Message{
+				Role:      "tool",
+				Content:   fmt.Sprintf("%v", resp.Content),
+				Timestamp: time.Now(),
+				Metadata: map[string]interface{}{
+					"tool_call_id": resp.ToolCallID,
+				},
+			})
+		}
+	}
+
+	return nil
+}
+
+// shouldCompleteExecution determines if the execution should complete
+func (r *Runner) shouldCompleteExecution(agent *Agent, metrics *RunMetrics, turn int, startTime time.Time, messages []Message) bool {
+	// Update metrics
+	metrics.Duration = time.Since(startTime)
+	metrics.TotalTurns = turn
+
+	// Check if we have structured output or text completion
+	if agent.OutputType == nil && len(messages) > 0 {
+		lastMessage := messages[len(messages)-1]
+		if lastMessage.Role == "assistant" && lastMessage.Content != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getFinalOutput extracts the final output from the execution
+func (r *Runner) getFinalOutput(agent *Agent, messages []Message) interface{} {
+	if len(messages) == 0 {
+		return "No output generated"
+	}
+
+	lastMessage := messages[len(messages)-1]
+	if lastMessage.Role == "assistant" {
+		return lastMessage.Content
+	}
+
+	return "No assistant response found"
 }

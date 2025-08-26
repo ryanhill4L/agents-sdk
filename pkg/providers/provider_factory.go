@@ -3,6 +3,8 @@ package providers
 import (
 	"fmt"
 	"os"
+	
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 )
 
 // ProviderFactory creates providers based on configuration
@@ -145,6 +147,59 @@ func (w WithProject) Apply(config interface{}) error {
 		return nil
 	}
 	return fmt.Errorf("project option only applies to OpenAI config")
+}
+
+// WithLogLevel sets the log level for the provider
+type WithLogLevel logging.LogLevel
+
+func (w WithLogLevel) Apply(config interface{}) error {
+	switch c := config.(type) {
+	case *OpenAIConfig:
+		c.LogLevel = logging.LogLevel(w)
+	case *AnthropicConfig:
+		c.LogLevel = logging.LogLevel(w)
+	case *GeminiConfig:
+		c.LogLevel = logging.LogLevel(w)
+	default:
+		return fmt.Errorf("unsupported config type for log level option")
+	}
+	return nil
+}
+
+// WithVerbose enables verbose logging for the provider
+type WithVerbose bool
+
+func (w WithVerbose) Apply(config interface{}) error {
+	switch c := config.(type) {
+	case *OpenAIConfig:
+		c.Verbose = bool(w)
+	case *AnthropicConfig:
+		c.Verbose = bool(w)
+	case *GeminiConfig:
+		c.Verbose = bool(w)
+	default:
+		return fmt.Errorf("unsupported config type for verbose option")
+	}
+	return nil
+}
+
+// WithLogger sets a custom logger for the provider
+type WithLogger struct {
+	Logger logging.Logger
+}
+
+func (w WithLogger) Apply(config interface{}) error {
+	switch c := config.(type) {
+	case *OpenAIConfig:
+		c.Logger = w.Logger
+	case *AnthropicConfig:
+		c.Logger = w.Logger
+	case *GeminiConfig:
+		c.Logger = w.Logger
+	default:
+		return fmt.Errorf("unsupported config type for logger option")
+	}
+	return nil
 }
 
 // Convenience functions for creating providers

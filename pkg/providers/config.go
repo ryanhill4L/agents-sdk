@@ -3,6 +3,8 @@ package providers
 import (
 	"os"
 	"time"
+	
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 )
 
 // ProviderType represents the type of LLM provider
@@ -43,6 +45,15 @@ type ProviderConfig struct {
 
 	// Debug enables detailed logging
 	Debug bool
+
+	// LogLevel specifies the minimum log level
+	LogLevel logging.LogLevel
+
+	// Verbose enables detailed request/response logging
+	Verbose bool
+
+	// Logger instance for logging (optional, uses default if nil)
+	Logger logging.Logger
 }
 
 // OpenAIConfig holds OpenAI-specific configuration
@@ -80,10 +91,20 @@ type GeminiConfig struct {
 
 // DefaultConfig returns a default configuration with common settings
 func DefaultConfig() ProviderConfig {
+	logLevel := logging.InfoLevel
+	if level := os.Getenv("AGENTS_LOG_LEVEL"); level != "" {
+		logLevel = logging.ParseLogLevel(level)
+	}
+
+	verbose := os.Getenv("AGENTS_VERBOSE") == "true"
+
 	return ProviderConfig{
 		Timeout:    30 * time.Second,
 		MaxRetries: 3,
 		Debug:      false,
+		LogLevel:   logLevel,
+		Verbose:    verbose,
+		Logger:     nil, // Will use default logger
 	}
 }
 
@@ -93,15 +114,13 @@ func NewOpenAIConfig(apiKey string) *OpenAIConfig {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
 	
+	defaultConfig := DefaultConfig()
+	defaultConfig.APIKey = apiKey
+	
 	return &OpenAIConfig{
-		ProviderConfig: ProviderConfig{
-			APIKey:     apiKey,
-			Timeout:    30 * time.Second,
-			MaxRetries: 3,
-			Debug:      false,
-		},
-		Organization: os.Getenv("OPENAI_ORG_ID"),
-		Project:      os.Getenv("OPENAI_PROJECT_ID"),
+		ProviderConfig: defaultConfig,
+		Organization:   os.Getenv("OPENAI_ORG_ID"),
+		Project:        os.Getenv("OPENAI_PROJECT_ID"),
 	}
 }
 
@@ -111,14 +130,12 @@ func NewAnthropicConfig(apiKey string) *AnthropicConfig {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	
+	defaultConfig := DefaultConfig()
+	defaultConfig.APIKey = apiKey
+	
 	return &AnthropicConfig{
-		ProviderConfig: ProviderConfig{
-			APIKey:     apiKey,
-			Timeout:    30 * time.Second,
-			MaxRetries: 3,
-			Debug:      false,
-		},
-		Version: "2023-06-01",
+		ProviderConfig: defaultConfig,
+		Version:        "2023-06-01",
 	}
 }
 
@@ -128,15 +145,13 @@ func NewGeminiConfig(apiKey string) *GeminiConfig {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	
+	defaultConfig := DefaultConfig()
+	defaultConfig.APIKey = apiKey
+	
 	return &GeminiConfig{
-		ProviderConfig: ProviderConfig{
-			APIKey:     apiKey,
-			Timeout:    30 * time.Second,
-			MaxRetries: 3,
-			Debug:      false,
-		},
-		ProjectID: os.Getenv("GOOGLE_CLOUD_PROJECT"),
-		Location:  "us-central1", // Default location
+		ProviderConfig: defaultConfig,
+		ProjectID:      os.Getenv("GOOGLE_CLOUD_PROJECT"),
+		Location:       "us-central1", // Default location
 	}
 }
 

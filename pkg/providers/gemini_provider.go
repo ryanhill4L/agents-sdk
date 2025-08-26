@@ -6,18 +6,26 @@ import (
 	"time"
 
 	"google.golang.org/genai"
+	"github.com/ryanhill4L/agents-sdk/pkg/logging"
 )
 
 // GeminiProvider implements the Provider interface using Google's Gemini API
 type GeminiProvider struct {
 	config *GeminiConfig
 	client *genai.Client
+	logger logging.Logger
 }
 
 // NewGeminiProvider creates a new Gemini provider instance
 func NewGeminiProvider(config *GeminiConfig) (*GeminiProvider, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Initialize logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logging.NewConsoleLogger(config.LogLevel, config.Verbose)
 	}
 
 	// Initialize Gemini client
@@ -39,18 +47,66 @@ func NewGeminiProvider(config *GeminiConfig) (*GeminiProvider, error) {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	return &GeminiProvider{
+	provider := &GeminiProvider{
 		config: config,
 		client: client,
-	}, nil
+		logger: logger.With(logging.String("provider", "gemini")),
+	}
+
+	backend := "gemini_api"
+	if config.ProjectID != "" {
+		backend = "vertex_ai"
+	}
+
+	provider.logger.Info(context.Background(), "Gemini provider initialized", 
+		logging.String("backend", backend),
+		logging.String("project_id", config.ProjectID),
+		logging.String("location", config.Location),
+		logging.String("log_level", config.LogLevel.String()),
+		logging.Bool("verbose", config.Verbose))
+
+	return provider, nil
 }
 
 // Complete implements the Provider interface for Gemini
 func (p *GeminiProvider) Complete(ctx context.Context, agent Agent, messages []Message, tools []ToolDefinition) (*Completion, error) {
+	startTime := time.Now()
+	requestID := logging.NewRequestID()
+	
+	// Add request context to logger
+	ctx = logging.WithRequestID(ctx, requestID)
+	logger := p.logger.With(
+		logging.String("request_id", requestID),
+		logging.String("agent", agent.GetName()),
+		logging.String("model", agent.GetModel()),
+		logging.Int("input_messages", len(messages)),
+		logging.Int("available_tools", len(tools)),
+	)
+	
+	logger.Info(ctx, "Starting Gemini completion request")
+	
 	// Default model if not specified
 	model := agent.GetModel()
 	if model == "" {
 		model = "gemini-1.5-pro"
+		logger.Debug(ctx, "Using default model", logging.String("model", model))
+	}
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Request details",
+			logging.Float64("temperature", float64(agent.GetTemperature())),
+			logging.Int("max_tokens", agent.GetMaxTokens()),
+			logging.Float64("top_p", float64(agent.GetTopP())),
+		)
+		
+		// Log message content in verbose mode
+		for i, msg := range messages {
+			logger.Debug(ctx, "Input message",
+				logging.Int("index", i),
+				logging.String("role", msg.Role),
+				logging.String("content", msg.Content[:min(200, len(msg.Content))]), // Truncate for readability
+			)
+		}
 	}
 
 	// Convert messages to Gemini content format
@@ -119,9 +175,17 @@ func (p *GeminiProvider) Complete(ctx context.Context, agent Agent, messages []M
 		opts.TopP = &topP
 	}
 
+	logger.Debug(ctx, "Making Gemini API request")
+	
 	// Make API call to generate content
 	response, err := p.client.Models.GenerateContent(ctx, model, contents, opts)
+	requestDuration := time.Since(startTime)
+	
 	if err != nil {
+		logger.Error(ctx, "Gemini API call failed", 
+			logging.Error(err),
+			logging.Duration("duration", requestDuration),
+		)
 		return nil, fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
@@ -158,6 +222,26 @@ func (p *GeminiProvider) Complete(ctx context.Context, agent Agent, messages []M
 			CompletionTokens: int(response.UsageMetadata.CandidatesTokenCount),
 			TotalTokens:      int(response.UsageMetadata.TotalTokenCount),
 		}
+	}
+
+	// Log API response details
+	logger.Info(ctx, "Gemini API request completed",
+		logging.Duration("duration", requestDuration),
+		logging.Int("prompt_tokens", usage.PromptTokens),
+		logging.Int("completion_tokens", usage.CompletionTokens),
+		logging.Int("total_tokens", usage.TotalTokens),
+		logging.Int("candidates", len(response.Candidates)),
+	)
+	
+	if p.config.Verbose {
+		logger.Debug(ctx, "Response message",
+			logging.String("content", responseContent[:min(200, len(responseContent))]),
+			logging.Int("tool_calls", len(toolCalls)),
+		)
+	}
+	
+	if len(toolCalls) > 0 {
+		logger.Debug(ctx, "Processed tool calls", logging.Int("count", len(toolCalls)))
 	}
 
 	// Convert response
