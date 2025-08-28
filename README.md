@@ -148,6 +148,22 @@ cd examples/json
 go run main.go
 ```
 
+### MCP Integration Example
+Demonstrates Model Context Protocol (MCP) support for external tool integration.
+
+```bash
+cd examples/mcp-integration
+export OPENAI_API_KEY="your-key-here"
+make run
+```
+
+**Features:**
+- External tool integration via MCP protocol
+- Dynamic tool discovery from MCP servers
+- File system operations (read, write, list)
+- Weather API integration and time services
+- Seamless mixing of local and remote tools
+
 ## Architecture
 
 ### Core Components
@@ -161,6 +177,7 @@ agents-sdk/
 │   │   └── types.go     # Type definitions and interfaces
 │   ├── tools/           # Tool system for agent capabilities
 │   │   ├── function_tool.go  # Go function to tool conversion
+│   │   ├── mcp_tool.go       # Model Context Protocol integration
 │   │   └── tools.go     # Tool interfaces and utilities
 │   ├── providers/       # AI model provider integrations
 │   │   ├── openai_provider.go    # OpenAI GPT models
@@ -176,7 +193,8 @@ agents-sdk/
 └── examples/            # Complete working examples
     ├── event-scheduler/ # Multi-agent scheduling system
     ├── basic/          # Simple tool demonstration
-    └── json/           # Structured output example
+    ├── json/           # Structured output example
+    └── mcp-integration/ # Model Context Protocol integration
 ```
 
 ### Agent Lifecycle
