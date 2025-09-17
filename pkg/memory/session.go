@@ -1,34 +1,18 @@
 package memory
 
 import (
-	"context"
-	"time"
+	"errors"
+
+	"github.com/ryanhill4L/agents-sdk/pkg/types"
 )
 
-// Message represents a conversation message
-// This needs to be defined here to avoid circular imports
-type Message struct {
-	ID        int64                  `json:"id,omitempty"`
-	Role      string                 `json:"role"`
-	Content   string                 `json:"content"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
-}
+var ErrSessionNotFound = errors.New("session not found")
 
-// Session manages conversation history and state
 type Session interface {
-	// GetItems retrieves messages from the session
-	GetItems(ctx context.Context, limit int) ([]Message, error)
-
-	// AddItems adds messages to the session
-	AddItems(ctx context.Context, items []Message) error
-
-	// PopItem removes and returns the most recent message
-	PopItem(ctx context.Context) (*Message, error)
-
-	// Clear removes all messages from the session
-	Clear(ctx context.Context) error
-
-	// Close closes the session and cleans up resources
+	Load() ([]types.Message, error)
+	Save(messages []types.Message) error
+	Clear() error
+	Exists() bool
 	Close() error
+	GetID() string
 }

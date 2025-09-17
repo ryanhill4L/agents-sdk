@@ -1,58 +1,69 @@
-# Go Agents SDK
+# Claude Code SDK for Go
 
-A powerful Go SDK for building AI agents with tools, guardrails, memory, and multi-provider support. Create sophisticated AI systems that can make decisions, use tools, collaborate through handoffs, and maintain conversation context.
+A powerful Go SDK for building AI applications with Claude, following the architecture of the official Python SDK. Features a dual interface pattern for both simple queries and complex conversational interactions, with comprehensive tool support, permissions, hooks, and streaming capabilities.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/ryanhill4L/agents-sdk.svg)](https://pkg.go.dev/github.com/ryanhill4L/agents-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ryanhill4L/agents-sdk)](https://goreportcard.com/report/github.com/ryanhill4L/agents-sdk)
 
 ## Features
 
-### **Multi-Provider AI Integration**
-- **OpenAI** - GPT-4, GPT-4 Turbo, GPT-3.5 Turbo
-- **Anthropic** - Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku  
-- **Google** - Gemini 2.0 Flash, Gemini 1.5 Pro
-- Unified API across all providers with automatic failover
+### **Dual Interface Pattern**
+- **Simple Query** - Stateless, one-off queries for quick interactions
+- **Interactive Client** - Stateful conversations with session management
 
-### **Powerful Tool System**
-- **Function Tools** - Convert Go functions into AI-callable tools with automatic schema generation
-- **Type Safety** - Automatic parameter validation and type conversion
-- **Parallel Execution** - Tools can run concurrently for improved performance
-- **Error Handling** - Comprehensive error propagation and context
+### **Comprehensive Tool System**
+- **Function Tools** - Convert any Go function into an AI-callable tool
+- **Automatic Schema Generation** - Type-safe parameter validation
+- **Permission System** - Granular control over tool execution
+- **MCP-Compatible** - Support for Model Context Protocol patterns
 
-### **Agent Handoffs & Orchestration**
-- **Smart Routing** - Agents can delegate tasks to specialized sub-agents
-- **Context Preservation** - Full conversation context maintained across handoffs
-- **Circular Detection** - Prevents infinite handoff loops with validation
-- **Execution Tracking** - Complete audit trail of agent interactions
+### **Advanced Capabilities**
+- **Streaming Support** - Real-time response streaming with channels
+- **Hook System** - Event-driven architecture for intercepting operations
+- **Session Management** - SQLite-based conversation persistence
+- **Permission Controls** - Fine-grained access control for tools
+- **Error Handling** - Comprehensive error types with retry logic
 
-### **Guardrails & Safety**
-- **Input Validation** - Screen requests before processing
-- **Output Filtering** - Validate responses before returning
-- **Custom Guardrails** - Implement domain-specific safety checks
-- **Privacy Protection** - Built-in data protection patterns
+### **Built on Anthropic's Official SDK**
+- Uses the official `anthropic-sdk-go` for all API interactions
+- Full support for Claude 3.5 Sonnet and other models
+- Automatic token counting and usage tracking
+- Prompt caching support
 
-### **Memory & Sessions**
-- **SQLite Backend** - Persistent conversation storage
-- **Session Management** - Load and save conversation history
-- **Context Windows** - Intelligent context management for long conversations
-- **Multi-Session** - Support for concurrent user sessions
-
-### **Observability & Monitoring**
-- **Distributed Tracing** - Full request/response tracing
-- **Performance Metrics** - Token usage, latency, and success rates
-- **Debug Logging** - Detailed execution logs for troubleshooting
-- **Console Tracer** - Built-in development debugging
-
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
 go get github.com/ryanhill4L/agents-sdk
 ```
 
-### Basic Example
+## Quick Start
+
+### Simple Query
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    claudecode "github.com/ryanhill4L/agents-sdk"
+)
+
+func main() {
+    result, err := claudecode.Query(
+        "What is the capital of France?",
+        claudecode.WithAPIKey("your-api-key"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Println(result.Content)
+}
+```
+
+### Interactive Client
 
 ```go
 package main
@@ -62,358 +73,250 @@ import (
     "fmt"
     "log"
 
-    "github.com/ryanhill4L/agents-sdk/pkg/agents"
-    "github.com/ryanhill4L/agents-sdk/pkg/providers"
-    "github.com/ryanhill4L/agents-sdk/pkg/tools"
-    "github.com/ryanhill4L/agents-sdk/pkg/tracing"
+    claudecode "github.com/ryanhill4L/agents-sdk"
 )
 
-// Define a simple tool
-func add(a, b int) int {
-    return a + b
-}
-
 func main() {
-    // Create a tool from your function
-    addTool, err := tools.NewFunctionTool("add", "Adds two numbers", add)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Create an agent
-    agent := agents.NewAgent("Math Assistant",
-        agents.WithInstructions("You are a helpful math assistant."),
-        agents.WithModel("gpt-4"),
-        agents.WithTools(addTool),
+    client, err := claudecode.NewClient(
+        claudecode.WithAPIKey("your-api-key"),
+        claudecode.WithSystemPrompt("You are a helpful assistant."),
     )
-
-    // Create a provider (OpenAI, Anthropic, or Gemini)
-    provider, err := providers.NewOpenAIProviderFromEnv()
     if err != nil {
         log.Fatal(err)
     }
+    defer client.Close()
 
-    // Create a runner
-    runner := agents.NewRunner(
-        agents.WithProvider(provider),
-        agents.WithTracer(tracing.NewConsoleTracer()),
+    response, err := client.SendMessage(
+        context.Background(),
+        "Hello! How can you help me today?",
     )
-
-    // Run the agent
-    ctx := context.Background()
-    result, err := runner.Run(ctx, agent, "What is 15 + 27?")
     if err != nil {
         log.Fatal(err)
     }
 
-    fmt.Printf("Response: %s\n", result.FinalOutput)
-    fmt.Printf("Tokens: %d, Duration: %v\n", 
-        result.Metrics.TotalTokens, result.Metrics.Duration)
+    fmt.Println(response.GetContent())
 }
-```
-
-## Examples
-
-### Event Scheduling Agent
-A complete example showing agent handoffs, database tools, and guardrails.
-
-```bash
-cd examples/event-scheduler
-export OPENAI_API_KEY="your-key-here"
-go run main.go
-```
-
-**Features:**
-- Multi-agent orchestration with triage routing
-- Database integration with SQLite
-- Conflict detection and scheduling optimization
-- Privacy guardrails for sensitive data
-
-### Basic Tools Demo
-Simple demonstration of function tools and multi-provider support.
-
-```bash
-cd examples/basic
-export OPENAI_API_KEY="your-openai-key"
-export ANTHROPIC_API_KEY="your-anthropic-key"
-export GEMINI_API_KEY="your-gemini-key"
-go run main.go
-```
-
-### JSON Structure Example
-Shows structured output with type-safe JSON parsing.
-
-```bash
-cd examples/json
-go run main.go
 ```
 
 ## Architecture
 
-### Core Components
+This SDK follows the architecture of the official Python Claude Code SDK, adapted for Go idioms:
 
 ```
-agents-sdk/
+claudecode/
 ├── pkg/
-│   ├── agents/          # Core agent framework
-│   │   ├── agent.go     # Agent definition and configuration
-│   │   ├── runner.go    # Execution engine with turn management
-│   │   └── types.go     # Type definitions and interfaces
-│   ├── tools/           # Tool system for agent capabilities
-│   │   ├── function_tool.go  # Go function to tool conversion
-│   │   └── tools.go     # Tool interfaces and utilities
-│   ├── providers/       # AI model provider integrations
-│   │   ├── openai_provider.go    # OpenAI GPT models
-│   │   ├── anthropic_provider.go # Anthropic Claude models
-│   │   └── gemini_provider.go    # Google Gemini models
-│   ├── memory/          # Session management and persistence
-│   │   ├── session.go   # Session interface
-│   │   └── sqlite_session.go # SQLite implementation
-│   ├── guardrails/      # Safety and validation system
-│   │   └── guardrail.go # Guardrail interfaces
-│   └── tracing/         # Observability and monitoring
-│       └── tracer.go    # Tracing interfaces and console tracer
-└── examples/            # Complete working examples
-    ├── event-scheduler/ # Multi-agent scheduling system
-    ├── basic/          # Simple tool demonstration
-    └── json/           # Structured output example
+│   ├── client/          # Interactive conversation client
+│   ├── query/           # Stateless query interface
+│   ├── types/           # Core types and messages
+│   ├── transport/       # Anthropic SDK integration
+│   ├── tools/           # Tool system and function tools
+│   ├── permissions/     # Permission management
+│   ├── hooks/           # Event hook system
+│   ├── memory/          # Session management
+│   └── errors/          # Custom error types
+└── examples/            # Usage examples
 ```
 
-### Agent Lifecycle
+## Core Concepts
 
-1. **Initialization** - Agent created with tools, instructions, and configuration
-2. **Validation** - Check for circular handoffs and required dependencies
-3. **Execution** - Runner manages conversation turns and tool calls
-4. **Tool Calling** - Automatic function execution with type conversion
-5. **Handoffs** - Optional delegation to specialized agents
-6. **Response** - Final output with metrics and tracing data
+### Messages
 
-## Configuration
+The SDK uses a comprehensive message system with content blocks:
 
-### Environment Variables
+```go
+// Message types
+userMsg := types.NewUserMessage("Hello")
+assistantMsg := types.NewAssistantMessage("Hi there!")
+systemMsg := types.NewSystemMessage("You are helpful")
+toolMsg := types.NewToolMessage(id, name, content, isError)
+
+// Content blocks
+textBlock := &types.TextBlock{Text: "Hello"}
+toolUseBlock := &types.ToolUseBlock{Name: "calculator", Arguments: args}
+toolResultBlock := &types.ToolResultBlock{Content: result}
+```
+
+### Tools
+
+Convert any Go function into a tool:
+
+```go
+func add(a, b float64) float64 {
+    return a + b
+}
+
+tool := tools.Function("add", "Add two numbers", add)
+client.RegisterTool(tool)
+
+response, _ := client.SendMessage(ctx, "What is 5 + 3?")
+// Claude will automatically use the tool to calculate
+```
+
+### Permissions
+
+Control tool execution with granular permissions:
+
+```go
+client, _ := claudecode.NewClient(
+    claudecode.WithPermissionMode(types.PermissionDefault),
+    claudecode.WithAllowedDirectories("./safe"),
+    claudecode.WithBlockedDirectories("/etc", "/usr"),
+)
+
+// Custom permission callback
+client.SetPermissionCallback(func(req types.PermissionRequest) types.PermissionResponse {
+    if req.Tool == "dangerous_operation" {
+        return types.PermissionResponse{
+            Allowed: false,
+            Reason: "Operation not permitted",
+        }
+    }
+    return types.PermissionResponse{Allowed: true}
+})
+```
+
+### Hooks
+
+Intercept and modify behavior with hooks:
+
+```go
+loggingHook := types.NewSimpleHook(
+    "logger",
+    []types.HookEvent{types.HookPreMessage, types.HookPostMessage},
+    func(ctx *types.HookContext) error {
+        log.Printf("Event: %s", ctx.Event)
+        return nil
+    },
+)
+
+client.RegisterHook(loggingHook)
+```
+
+### Streaming
+
+Real-time response streaming:
+
+```go
+client, _ := claudecode.NewClient(
+    claudecode.WithStreaming(true),
+)
+
+chunks, _ := client.SendMessageStreaming(ctx, "Tell me a story")
+
+for chunk := range chunks {
+    if chunk.Content != "" {
+        fmt.Print(chunk.Content)
+    }
+}
+```
+
+### Sessions
+
+Persistent conversation history:
+
+```go
+client, _ := claudecode.NewClient(
+    claudecode.WithSession("./sessions.db", "user-123"),
+)
+
+// Conversation history is automatically saved and restored
+```
+
+## Configuration Options
+
+```go
+// Available options
+claudecode.WithAPIKey("sk-...")           // API key
+claudecode.WithModel("claude-3-5-sonnet") // Model selection
+claudecode.WithSystemPrompt("...")        // System instructions
+claudecode.WithMaxTurns(10)               // Max conversation turns
+claudecode.WithMaxTokens(4096)            // Max response tokens
+claudecode.WithTemperature(0.7)           // Creativity control
+claudecode.WithStreaming(true)            // Enable streaming
+claudecode.WithTimeout(2 * time.Minute)   // Request timeout
+claudecode.WithDebug(true)                // Debug logging
+
+// Permission options
+claudecode.WithPermissionMode(mode)       // Permission mode
+claudecode.WithAllowedDirectories(dirs)   // Allowed paths
+claudecode.WithBlockedDirectories(dirs)   // Blocked paths
+
+// Session options
+claudecode.WithSession(dbPath, sessionID) // Enable sessions
+```
+
+## Permission Modes
+
+- `PermissionDefault` - Standard permissions, callbacks for sensitive operations
+- `PermissionAcceptAll` - Allow all operations (use with caution)
+- `PermissionAcceptEdits` - Allow read/write, prompt for delete/execute
+- `PermissionBypass` - Skip all permission checks
+- `PermissionRejectAll` - Reject all tool operations
+
+## Examples
+
+See the `examples/` directory for complete examples:
+
+- `simple_query/` - Basic stateless queries
+- `interactive_client/` - Interactive conversation client
+- `tools/` - Function tools and calculations
+- `streaming/` - Real-time streaming responses
+- `permissions/` - Permission system demo
+- `hooks/` - Event hooks and logging
+
+## Environment Variables
 
 ```bash
-# AI Provider API Keys
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."  
-export GEMINI_API_KEY="..."
-
-# Optional Configuration
-export AGENTS_DEBUG=true
-export AGENTS_TRACE_LEVEL=debug
-export AGENTS_MAX_TOKENS=4096
+export ANTHROPIC_API_KEY="your-api-key"
 ```
 
-### Provider Configuration
+## Error Handling
+
+The SDK provides comprehensive error types:
 
 ```go
-// OpenAI
-provider, err := providers.NewOpenAIProviderWithKey("sk-...")
-
-// Anthropic
-provider, err := providers.NewAnthropicProviderWithKey("sk-ant-...")
-
-// Gemini
-provider, err := providers.NewGeminiProviderWithKey("gemini-key")
-
-// From environment
-provider, err := providers.NewOpenAIProviderFromEnv()
-```
-
-### Agent Configuration
-
-```go
-agent := agents.NewAgent("Agent Name",
-    agents.WithInstructions("Your role and instructions"),
-    agents.WithModel("gpt-4"),
-    agents.WithTools(tool1, tool2),
-    agents.WithHandoffs(subAgent1, subAgent2),
-    agents.WithGuardrails(guardrail),
-    agents.WithTemperature(0.7),
-)
-```
-
-### Runner Configuration
-
-```go
-runner := agents.NewRunner(
-    agents.WithProvider(provider),
-    agents.WithTracer(tracing.NewConsoleTracer()),
-    agents.WithMaxTurns(10),
-    agents.WithParallelTools(true),
-)
-```
-
-## Advanced Features
-
-### Custom Tools
-
-```go
-// Database query tool
-func queryDB(query string) ([]map[string]any, error) {
-    // Your database logic
-    return results, nil
-}
-
-tool, err := tools.NewFunctionTool(
-    "query_database", 
-    "Execute SQL queries", 
-    queryDB,
-)
-```
-
-### Agent Handoffs
-
-```go
-// Specialized agents
-dataAgent := agents.NewAgent("Data Analyst", ...)
-reportAgent := agents.NewAgent("Report Generator", ...)
-
-// Orchestrator with handoffs
-orchestrator := agents.NewAgent("Coordinator",
-    agents.WithHandoffs(dataAgent, reportAgent),
-    agents.WithInstructions("Route tasks to specialists..."),
-)
-```
-
-### Memory Integration
-
-```go
-// Session-aware runner
-session, err := memory.NewSQLiteSession("./sessions.db", "user123")
-runner := agents.NewRunner(
-    agents.WithProvider(provider),
-    agents.WithSession(session),
-)
-
-// Conversation history is automatically preserved
-```
-
-### Custom Guardrails
-
-```go
-type MyGuardrail struct{}
-
-func (g *MyGuardrail) Name() string { return "my_check" }
-func (g *MyGuardrail) Description() string { return "Custom validation" }
-func (g *MyGuardrail) Validate(content string) error {
-    if containsSensitiveData(content) {
-        return fmt.Errorf("sensitive data detected")
+if err != nil {
+    switch {
+    case errors.Is(err, errors.ErrNoAPIKey):
+        // Handle missing API key
+    case errors.Is(err, errors.ErrMaxTurnsExceeded):
+        // Handle conversation limit
+    case errors.Is(err, errors.ErrPermissionDenied):
+        // Handle permission denial
+    case errors.IsRetryable(err):
+        // Retry the operation
     }
-    return nil
-}
-
-agent := agents.NewAgent("Secure Agent",
-    agents.WithGuardrails(&MyGuardrail{}),
-)
-```
-
-## API Reference
-
-### Core Types
-
-```go
-type Agent struct {
-    // Agent configuration and state
-}
-
-type RunResult struct {
-    FinalOutput string
-    Metrics     RunMetrics
-    TraceID     string
-}
-
-type RunMetrics struct {
-    TotalTurns   int
-    ToolCalls    int
-    Handoffs     int
-    TotalTokens  int
-    Duration     time.Duration
 }
 ```
 
-### Key Interfaces
+## Migration from Previous Version
 
-```go
-type Provider interface {
-    Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error)
-}
+This is a complete rewrite following the Python SDK architecture. Key changes:
 
-type Tool interface {
-    Name() string
-    Description() string
-    Execute(ctx context.Context, args map[string]any) (any, error)
-}
+1. **Dual Interface** - Use `Query()` for simple requests, `Client` for conversations
+2. **No Agent Handoffs** - Removed in favor of tool-based patterns
+3. **No Multi-Provider** - Focused solely on Anthropic's Claude
+4. **New Permission System** - Replaces guardrails with permissions
+5. **Hook System** - Replaces tracing with event hooks
 
-type Guardrail interface {
-    Name() string
-    Description() string
-    Validate(content string) error
-}
-```
+## Requirements
 
-## Performance & Scalability
-
-- **Concurrent Tool Execution** - Multiple tools can run in parallel
-- **Efficient Context Management** - Smart context window handling
-- **Connection Pooling** - Reused HTTP connections to providers
-- **Memory Optimization** - Efficient session storage and retrieval
-- **Timeout Handling** - Configurable timeouts for all operations
-
-## Security & Privacy
-
-- **API Key Management** - Secure credential handling
-- **Input Sanitization** - Automatic validation of user inputs
-- **Output Filtering** - Guardrails for response validation
-- **Data Isolation** - Session-based data separation
-- **Audit Logging** - Complete tracing of all operations
+- Go 1.19 or higher
+- Anthropic API key
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-git clone https://github.com/ryanhill4L/agents-sdk.git
-cd agents-sdk
-go mod download
-go test ./...
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run specific package
-go test ./pkg/agents
-```
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Support
+## Acknowledgments
 
-- **Documentation**: [pkg.go.dev](https://pkg.go.dev/github.com/ryanhill4L/agents-sdk)
-- **Quickstart**: See [QUICKSTART.md](QUICKSTART.md)
-- **Discussions**: [GitHub Discussions](https://github.com/ryanhill4L/agents-sdk/discussions)
-- **Bug Reports**: [GitHub Issues](https://github.com/ryanhill4L/agents-sdk/issues)
-
-## Roadmap
-
-- [ ] **Stream Processing** - Real-time streaming responses
-- [ ] **Plugin System** - Dynamic tool loading
-- [ ] **Workflow Engine** - Complex multi-step processes
-- [ ] **Vector Memory** - Semantic memory with embeddings
-- [ ] **Web Interface** - Browser-based agent management
-- [ ] **Kubernetes Operator** - Cloud-native deployment
+- Built on [Anthropic's official Go SDK](https://github.com/anthropics/anthropic-sdk-go)
+- Architecture inspired by [Claude Code SDK Python](https://github.com/anthropics/claude-code-sdk-python)
 
 ---
 
-Built with ❤️ by [Ryan Hill](https://github.com/ryanhill4L)
+Built with ❤️ for the Go community
