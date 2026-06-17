@@ -56,6 +56,16 @@ func TestCronList(t *testing.T) {
 	}
 }
 
+func TestCronSundayBothForms(t *testing.T) {
+	sunday := time.Date(2024, 1, 7, 9, 0, 0, 0, time.UTC) // a Sunday
+	for _, expr := range []string{"0 9 * * 0", "0 9 * * 7"} {
+		s := mustCompile(t, expr)
+		if !s.Matches(sunday) {
+			t.Errorf("%q should match Sunday 09:00", expr)
+		}
+	}
+}
+
 func TestCronInvalid(t *testing.T) {
 	for _, expr := range []string{"", "1 2 3", "60 * * * *", "* * * * 9", "*/0 * * * *"} {
 		s := Schedule{Cron: expr}

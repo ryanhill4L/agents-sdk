@@ -96,25 +96,37 @@ func Run(ctx context.Context, scheds []Schedule, trigger TriggerFunc) error {
 	}
 
 	// Align to the next minute boundary, then tick every minute.
-	now := time.Now()
-	next := now.Truncate(time.Minute).Add(time.Minute)
-	timer := time.NewTimer(time.Until(next))
+	timer := time.NewTimer(time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)))
 	defer timer.Stop()
+
+	// Triggers run in their own goroutines so a long-running trigger (e.g. an
+	// LLM call) cannot block or skip subsequent ticks. The first trigger error
+	// is surfaced and stops the scheduler.
+	errCh := make(chan error, 1)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-errCh:
+			return err
 		case t := <-timer.C:
 			for _, s := range scheds {
 				if s.Matches(t) {
-					if err := trigger(ctx, s); err != nil {
-						return err
-					}
+					s := s
+					go func() {
+						if err := trigger(ctx, s); err != nil {
+							select {
+							case errCh <- err:
+							default:
+							}
+						}
+					}()
 				}
 			}
-			next = next.Add(time.Minute)
-			timer.Reset(time.Until(next))
+			// Re-align to the next boundary from now so a slow tick doesn't
+			// build a backlog or drift.
+			timer.Reset(time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)))
 		}
 	}
 }
@@ -177,9 +189,14 @@ func parseCron(expr string) (cronSchedule, error) {
 	if err != nil {
 		return cronSchedule{}, fmt.Errorf("month: %w", err)
 	}
-	dow, err := parseField(fields[4], 0, 6)
+	// Day-of-week accepts 0-7 where both 0 and 7 mean Sunday; fold 7 into 0.
+	dow, err := parseField(fields[4], 0, 7)
 	if err != nil {
 		return cronSchedule{}, fmt.Errorf("day-of-week: %w", err)
+	}
+	if dow[7] {
+		dow[0] = true
+		delete(dow, 7)
 	}
 
 	return cronSchedule{

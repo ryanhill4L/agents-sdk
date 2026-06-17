@@ -25,6 +25,11 @@ import (
 //
 // Always set Ref to an immutable commit SHA for GitHub sources, and prefer
 // setting SHA256 so the fetched bytes are integrity-checked.
+//
+// Security note: Ref is only required to be non-empty. Pointing it at a mutable
+// branch or tag (rather than a commit SHA) defeats the immutability guarantee —
+// the upstream content can change underneath you. Without SHA256, cached bytes
+// are served without revalidation. Pin a SHA for anything you don't control.
 type RemoteSource struct {
 	Source string `yaml:"source"`
 	Ref    string `yaml:"ref"`
@@ -68,14 +73,16 @@ func FetchRemote(ctx context.Context, src RemoteSource, opts FetchOptions) (Skil
 	if err != nil {
 		return Skill{}, err
 	}
-	cachePath := filepath.Join(cacheDir, cacheKey(src)+".md")
+	// Key the cache by the fully resolved URL so distinct sources/refs can never
+	// collide on a single cache entry.
+	cachePath := filepath.Join(cacheDir, cacheKey(rawURL)+".md")
 
 	data, err := readCache(cachePath, src.SHA256)
 	if err != nil {
 		return Skill{}, err
 	}
 	if data == nil {
-		data, err = download(ctx, rawURL, opts)
+		data, err = download(ctx, rawURL, opts, allowedHosts(opts))
 		if err != nil {
 			return Skill{}, err
 		}
@@ -171,14 +178,15 @@ func resolveCacheDir(dir string) (string, error) {
 		}
 		dir = filepath.Join(base, "agents-sdk", "skills")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// Integrity-sensitive: keep the cache private to the user.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
 }
 
-func cacheKey(src RemoteSource) string {
-	sum := sha256.Sum256([]byte(src.Source + "@" + src.Ref))
+func cacheKey(rawURL string) string {
+	sum := sha256.Sum256([]byte(rawURL))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -201,13 +209,23 @@ func readCache(cachePath, wantSHA string) ([]byte, error) {
 }
 
 func writeCache(cachePath string, data []byte) error {
-	return os.WriteFile(cachePath, data, 0o644)
+	return os.WriteFile(cachePath, data, 0o600)
 }
 
-func download(ctx context.Context, rawURL string, opts FetchOptions) ([]byte, error) {
+func download(ctx context.Context, rawURL string, opts FetchOptions, allowed []string) ([]byte, error) {
 	client := opts.Client
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Re-check redirect targets against the allowlist so it stays a real
+		// boundary even when a server redirects cross-host.
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return fmt.Errorf("stopped after 10 redirects")
+				}
+				return checkHost(req.URL.String(), allowed)
+			},
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {

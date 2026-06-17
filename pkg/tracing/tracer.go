@@ -25,7 +25,8 @@ type Tracer interface {
 	StartSpan(ctx context.Context, name string, attrs []Attr) Span
 }
 
-// Span represents an in-progress operation.
+// Span represents an in-progress operation. A single Span is not safe for
+// concurrent use; give each goroutine its own span (via Start).
 type Span interface {
 	// SetAttributes adds attributes to the span.
 	SetAttributes(attrs ...Attr)

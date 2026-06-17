@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
@@ -54,19 +56,34 @@ func addTool() tools.Tool {
 }
 
 func httpGetTool() tools.Tool {
+	// Block redirects to private/loopback/link-local hosts too, since the URL is
+	// model-controlled and could otherwise reach internal services or cloud
+	// metadata endpoints (SSRF).
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return validatePublicURL(req.URL.String())
+		},
+	}
 	return tools.NewTool(
 		"http_get",
-		"Performs an HTTP GET request and returns the response body (truncated to 8KB).",
+		"Performs an HTTP GET request to a public URL and returns the response body (truncated to 8KB).",
 		func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-			url, _ := args["url"].(string)
-			if url == "" {
+			raw, _ := args["url"].(string)
+			if raw == "" {
 				return nil, fmt.Errorf("the 'url' argument is required")
 			}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err := validatePublicURL(raw); err != nil {
+				return nil, err
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 			if err != nil {
 				return nil, err
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				return nil, err
 			}
@@ -77,8 +94,42 @@ func httpGetTool() tools.Tool {
 			}
 			return string(body), nil
 		},
-		tools.Param{Name: "url", Type: "string", Description: "The URL to fetch.", Required: true},
+		tools.Param{Name: "url", Type: "string", Description: "The public http(s) URL to fetch.", Required: true},
 	)
+}
+
+// validatePublicURL rejects non-http(s) schemes and URLs whose host resolves to
+// a private, loopback, link-local, or unspecified address.
+func validatePublicURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported url scheme %q (only http/https)", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("url has no host")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("cannot resolve host %q: %w", host, err)
+	}
+	for _, ip := range ips {
+		if isDisallowedIP(ip) {
+			return fmt.Errorf("host %q resolves to a disallowed address %s", host, ip)
+		}
+	}
+	return nil
+}
+
+func isDisallowedIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified()
 }
 
 func asFloat(v interface{}) (float64, error) {

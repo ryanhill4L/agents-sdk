@@ -223,6 +223,11 @@ func sanitize(s string) string {
 }
 
 // convertSchema maps an MCP JSON-schema input into our ParameterSchema.
+//
+// TODO: this carries only per-property type/description; nested object
+// properties, array `items`, and `enum` constraints are dropped (a limitation
+// shared with tools.PropertySchema). Tools with rich array/object parameters
+// will be under-specified to the model until the schema type is enriched.
 func convertSchema(input any) tools.ParameterSchema {
 	schema := tools.ParameterSchema{
 		Type:       "object",

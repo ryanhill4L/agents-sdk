@@ -108,7 +108,6 @@ wired by calling `loader.Load(dir, registry)` from your own program.
 
 - `github.com/google/uuid` - UUID generation
 - `github.com/mattn/go-sqlite3` - SQLite database driver
-- `golang.org/x/sync/errgroup` - Concurrent execution patterns
 - `gopkg.in/yaml.v3` - YAML parsing for `agent.yaml`, skills front-matter, schedules
 - `github.com/modelcontextprotocol/go-sdk` - MCP client (stdio + streamable-HTTP)
 - Provider SDKs: `anthropic-sdk-go`, `openai-go`, `ollama`, `google.golang.org/genai`

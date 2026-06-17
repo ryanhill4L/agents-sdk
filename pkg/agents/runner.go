@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,7 +13,6 @@ import (
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
-	"golang.org/x/sync/errgroup"
 )
 
 // Runner executes agent workflows
@@ -266,12 +266,7 @@ func (r *Runner) executeLoop(ctx *RunContext, tracer tracing.Tracer, logger *slo
 
 				if len(normalCalls) > 0 {
 					metrics.ToolCalls += len(normalCalls)
-					toolResponses, err := r.executeTools(turnCtx, tracer, logger, currentAgent, normalCalls)
-					if err != nil {
-						turnSpan.SetError(err)
-						return fmt.Errorf("tool execution failed: %w", err)
-					}
-					for _, resp := range toolResponses {
+					for _, resp := range r.executeTools(turnCtx, tracer, logger, currentAgent, normalCalls) {
 						messages = append(messages, toolMessage(resp.ToolCallID, toolContent(resp)))
 					}
 				}
@@ -342,29 +337,30 @@ func (r *Runner) executeLoop(ctx *RunContext, tracer tracing.Tracer, logger *slo
 	return nil, ErrMaxTurnsExceeded
 }
 
-// executeTools runs tool calls in parallel or sequence, tracing and logging each.
-func (r *Runner) executeTools(ctx context.Context, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, toolCalls []ToolCall) ([]ToolResponse, error) {
+// executeTools runs tool calls in parallel or sequence, tracing and logging
+// each. Per-tool failures are reported in the corresponding ToolResponse.Error
+// (and fed back to the model), so this never fails as a whole.
+func (r *Runner) executeTools(ctx context.Context, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, toolCalls []ToolCall) []ToolResponse {
 	responses := make([]ToolResponse, len(toolCalls))
 
 	if r.parallelTools && len(toolCalls) > 1 {
-		g, gCtx := errgroup.WithContext(ctx)
+		var wg sync.WaitGroup
 		for i, call := range toolCalls {
 			i, call := i, call // capture loop variables
-			g.Go(func() error {
-				responses[i] = r.runTool(gCtx, tracer, logger, agent, call)
-				return nil
-			})
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				responses[i] = r.runTool(ctx, tracer, logger, agent, call)
+			}()
 		}
-		if err := g.Wait(); err != nil {
-			return nil, err
-		}
+		wg.Wait()
 	} else {
 		for i, call := range toolCalls {
 			responses[i] = r.runTool(ctx, tracer, logger, agent, call)
 		}
 	}
 
-	return responses, nil
+	return responses
 }
 
 // runTool executes a single tool call within its own span.
@@ -555,24 +551,24 @@ func convertProperties(props map[string]tools.PropertySchema) map[string]provide
 	return result
 }
 
-// RunAsync provides a channel-based async interface
-func RunAsync(ctx context.Context, agent *Agent, input string, opts ...RunnerOption) <-chan *RunResult {
-	resultChan := make(chan *RunResult, 1)
+// AsyncResult carries the outcome of a RunAsync call, including any error.
+type AsyncResult struct {
+	Result *RunResult
+	Err    error
+}
+
+// RunAsync provides a channel-based async interface. The sent AsyncResult
+// carries either a Result or an Err, so callers can distinguish failure from a
+// successful run rather than string-sniffing the output.
+func RunAsync(ctx context.Context, agent *Agent, input string, opts ...RunnerOption) <-chan AsyncResult {
+	resultChan := make(chan AsyncResult, 1)
 
 	go func() {
 		defer close(resultChan)
 
 		runner := NewRunner(opts...)
 		result, err := runner.Run(ctx, agent, input)
-
-		if err != nil {
-			// Include error in result
-			result = &RunResult{
-				FinalOutput: fmt.Sprintf("Error: %v", err),
-			}
-		}
-
-		resultChan <- result
+		resultChan <- AsyncResult{Result: result, Err: err}
 	}()
 
 	return resultChan

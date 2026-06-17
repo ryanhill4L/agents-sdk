@@ -57,8 +57,18 @@ func (a *Agent) AddCloser(c io.Closer) {
 }
 
 // Close releases the agent's resources and those of its subagents. It is safe
-// to call on agents with nothing to close.
+// to call on agents with nothing to close, and on graphs that share or cycle
+// through subagents (each agent is closed at most once).
 func (a *Agent) Close() error {
+	return a.closeTree(make(map[*Agent]bool))
+}
+
+func (a *Agent) closeTree(visited map[*Agent]bool) error {
+	if visited[a] {
+		return nil
+	}
+	visited[a] = true
+
 	a.mu.Lock()
 	closers := a.closers
 	a.closers = nil
@@ -72,7 +82,7 @@ func (a *Agent) Close() error {
 		}
 	}
 	for _, h := range handoffs {
-		if err := h.Close(); err != nil && firstErr == nil {
+		if err := h.closeTree(visited); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
