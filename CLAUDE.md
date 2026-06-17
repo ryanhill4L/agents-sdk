@@ -51,6 +51,11 @@ go test ./pkg/agents
   - Catalog is appended to the system prompt; bodies are pulled via the `load_skill` builtin tool
   - Remote skills (`RemoteSource`): declared in `agent.yaml`, fetched at load time, pinned by commit SHA, `sha256`-verified, host-allowlisted, and cached (never model-driven runtime fetches)
 
+- **`pkg/mcp/`** - Model Context Protocol integration
+  - Connects to MCP servers over stdio or streamable-HTTP using `modelcontextprotocol/go-sdk`
+  - Adapts each server tool into the SDK's `tools.Tool` interface (namespaced as `<server>_<tool>`)
+  - `Manager` aggregates multiple servers; connections close via `Agent.Close()`
+
 - **`pkg/channels/`** - Integration adapters
   - `Channel` interface; built-in `HTTPChannel` powers `eve dev` (POST /chat)
 
@@ -103,11 +108,12 @@ wired by calling `loader.Load(dir, registry)` from your own program.
 - `github.com/mattn/go-sqlite3` - SQLite database driver
 - `golang.org/x/sync/errgroup` - Concurrent execution patterns
 - `gopkg.in/yaml.v3` - YAML parsing for `agent.yaml`, skills front-matter, schedules
+- `github.com/modelcontextprotocol/go-sdk` - MCP client (stdio + streamable-HTTP)
 - Provider SDKs: `anthropic-sdk-go`, `openai-go`, `ollama`, `google.golang.org/genai`
 
 ## Development Notes
 
 - Provider, guardrail, and tracing packages are implemented
 - Tests live alongside code as `*_test.go` (loader, skills, schedules, tools, agents)
-- Module uses Go 1.24.3
+- Module requires Go 1.25 (raised by the MCP SDK dependency)
 - Build the CLI with `make build-cli`; validate the example with `make run-fs-example`

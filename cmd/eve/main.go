@@ -75,7 +75,8 @@ Environment:
 `)
 }
 
-// loadAgent loads the agent at dir using the CLI's builtin tool registry.
+// loadAgent loads the agent at dir using the CLI's builtin tool registry,
+// connecting any declared MCP servers. Callers should defer agent.Close().
 func loadAgent(dir string) (*agents.Agent, error) {
 	return loader.Load(dir, builtinRegistry())
 }
@@ -94,7 +95,8 @@ func cmdValidate(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: eve validate <dir>")
 	}
-	agent, err := loadAgent(args[0])
+	// Skip connecting to MCP servers so validate stays offline.
+	agent, err := loader.LoadWithOptions(args[0], builtinRegistry(), loader.Options{SkipMCP: true})
 	if err != nil {
 		return err
 	}
@@ -104,6 +106,7 @@ func cmdValidate(args []string) error {
 	fmt.Printf("  tools:     %s\n", orNone(toolNames(agent)))
 	fmt.Printf("  skills:    %s\n", orNone(skillNames(agent)))
 	fmt.Printf("  subagents: %s\n", orNone(handoffNames(agent)))
+	fmt.Printf("  mcp:       %s\n", orNone(strings.Join(agent.MCPServers, ", ")))
 	return nil
 }
 
@@ -115,6 +118,7 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer agent.Close()
 
 	input := strings.Join(args[1:], " ")
 	if input == "" {
@@ -154,6 +158,8 @@ func cmdDev(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer agent.Close()
+
 	runner, err := newRunner(agent)
 	if err != nil {
 		return err
@@ -183,6 +189,8 @@ func cmdSchedules(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer agent.Close()
+
 	scheds, err := schedules.LoadDir(agent.Dir + "/" + loader.SchedulesDir)
 	if err != nil {
 		return err

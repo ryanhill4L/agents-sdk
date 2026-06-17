@@ -109,6 +109,35 @@ In code: `agents.WithHandoffs(sub)` (shared) or
 a handoff by calling the auto-generated `handoff_<name>` tool; the runner
 intercepts it and applies the configured mode.
 
+## MCP servers (Model Context Protocol)
+
+Agents gain real, dynamic tools by connecting to **MCP servers** declared in
+`agent.yaml`. Servers are connected at load time over **stdio** (local
+subprocess) or **streamable-HTTP** (remote), their tools are listed and adapted
+into the SDK's tool interface, and they're closed when the agent is. This is
+also how a CLI-run agent gets tools beyond the three builtins — without
+recompiling.
+
+```yaml
+# agent.yaml
+mcp:
+  - name: github             # tools are exposed to the model as github_<tool>
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+    env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }   # $VARs are expanded
+  - name: search
+    transport: http
+    url: https://mcp.example.com
+    headers: { Authorization: "Bearer ${SEARCH_KEY}" }
+    tools: [web_search]      # optional allowlist of tool names
+```
+
+Built on the official [`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk).
+Servers are **declared in config, never chosen by the model**; tool names are
+namespaced by server to avoid collisions. From code, use `mcp.ConnectAll` and
+add `manager.Tools()` to an agent, or just let the loader do it. Remember to
+`defer agent.Close()` to release MCP connections.
+
 ## The `eve` CLI
 
 ```bash
@@ -193,6 +222,7 @@ files into those calls.
 | `pkg/loader`      | Builds an `Agent` from a directory (`agent.yaml`, `instructions.md`, …) |
 | `pkg/skills`      | Skill parsing, the catalog, and the `load_skill` builtin tool         |
 | `pkg/tools`       | `Tool` interface, `Registry`, `FunctionTool` (reflection), `SimpleTool` |
+| `pkg/mcp`         | Connects MCP servers (stdio/HTTP) and adapts their tools to `tools.Tool` |
 | `pkg/channels`    | Integration adapters; built-in HTTP channel (powers `eve dev`)        |
 | `pkg/schedules`   | Cron parsing and a dependency-free scheduler                          |
 | `pkg/providers`   | OpenAI, Anthropic, Gemini, and Ollama integrations + `Resolve`        |

@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/agents"
+	"github.com/ryanhill4L/agents-sdk/pkg/mcp"
 	"github.com/ryanhill4L/agents-sdk/pkg/skills"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 )
@@ -54,6 +55,10 @@ type Config struct {
 	// Skills declares remote skills fetched at load time. Local skills in the
 	// skills/ directory are always loaded in addition to these.
 	Skills []skills.RemoteSource `yaml:"skills"`
+
+	// MCP declares Model Context Protocol servers whose tools are connected at
+	// load time and added to the agent.
+	MCP []mcp.ServerConfig `yaml:"mcp"`
 }
 
 // Options configures loading, primarily for fetching remote skills.
@@ -66,6 +71,9 @@ type Options struct {
 	AllowedHosts []string
 	// HTTPClient overrides the HTTP client used for remote fetches.
 	HTTPClient *http.Client
+	// SkipMCP, when true, records declared MCP servers without connecting to
+	// them (used by `eve validate` to stay offline).
+	SkipMCP bool
 }
 
 // Load builds an agent (and its subagents, recursively) from dir. Tools named in
@@ -181,8 +189,31 @@ func load(dir string, registry *tools.Registry, opts Options, seen map[string]bo
 		agentOpts = append(agentOpts, agents.WithHandoff(sub, mode))
 	}
 
+	// Connect declared MCP servers and add their tools.
+	var mcpManager *mcp.Manager
+	var mcpServers []string
+	for _, s := range cfg.MCP {
+		mcpServers = append(mcpServers, s.Name)
+	}
+	if len(cfg.MCP) > 0 && !opts.SkipMCP {
+		ctx := opts.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		mgr, err := mcp.ConnectAll(ctx, cfg.MCP)
+		if err != nil {
+			return nil, fmt.Errorf("agent %q: %w", name, err)
+		}
+		mcpManager = mgr
+		agentOpts = append(agentOpts, agents.WithTools(mgr.Tools()...))
+	}
+
 	agent := agents.NewAgent(name, agentOpts...)
 	agent.Dir = abs
+	agent.MCPServers = mcpServers
+	if mcpManager != nil {
+		agent.AddCloser(mcpManager)
+	}
 
 	if err := agent.Validate(); err != nil {
 		return nil, fmt.Errorf("agent %q: %w", name, err)

@@ -18,3 +18,14 @@ subagents:
 #   - source: github.com/acme/agent-skills/refunds.md
 #     ref: a1b2c3d4         # commit SHA (required for github sources)
 #     sha256: 9f86d0...     # optional integrity pin
+
+# MCP servers are connected at load time; their tools are added to the agent.
+# mcp:
+#   - name: github             # tools exposed as github_<tool>
+#     transport: stdio
+#     command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+#     env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }
+#   - name: search
+#     transport: http
+#     url: https://mcp.example.com
+#     headers: { Authorization: "Bearer ${SEARCH_KEY}" }

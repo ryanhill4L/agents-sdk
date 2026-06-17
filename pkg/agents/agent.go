@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -32,6 +33,9 @@ type Agent struct {
 	// Dir records the directory an agent was loaded from, when applicable.
 	Dir string
 
+	// MCPServers names the MCP servers declared for this agent (for reporting).
+	MCPServers []string
+
 	// Configuration
 	OutputType  OutputSchema
 	Temperature float32
@@ -41,15 +45,47 @@ type Agent struct {
 	// Runtime
 	handoffMap   map[string]*Agent
 	handoffModes map[string]HandoffMode
+	closers      []io.Closer
+}
+
+// AddCloser registers a resource (e.g. an MCP connection) to be released when
+// the agent is closed.
+func (a *Agent) AddCloser(c io.Closer) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.closers = append(a.closers, c)
+}
+
+// Close releases the agent's resources and those of its subagents. It is safe
+// to call on agents with nothing to close.
+func (a *Agent) Close() error {
+	a.mu.Lock()
+	closers := a.closers
+	a.closers = nil
+	handoffs := a.Handoffs
+	a.mu.Unlock()
+
+	var firstErr error
+	for _, c := range closers {
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, h := range handoffs {
+		if err := h.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // NewAgent creates a new agent with the given name and options
 func NewAgent(name string, opts ...AgentOption) *Agent {
 	agent := &Agent{
-		Name:        name,
-		Model:       "gpt-4",
-		Temperature: 0.7,
-		MaxTokens:   2000,
+		Name:         name,
+		Model:        "gpt-4",
+		Temperature:  0.7,
+		MaxTokens:    2000,
 		TopP:         1.0,
 		handoffMap:   make(map[string]*Agent),
 		handoffModes: make(map[string]HandoffMode),
