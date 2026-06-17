@@ -4,7 +4,7 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
-.PHONY: help build test run-example clean fmt vet tidy env
+.PHONY: help build build-cli test run-example clean fmt vet tidy env run-fs-example
 
 # Default target
 help: ## Show this help message
@@ -19,6 +19,14 @@ env: ## Export environment variables from .env file
 build: ## Build all packages
 	@echo "Building all packages..."
 	go build ./...
+
+build-cli: ## Build the eve CLI into bin/eve
+	@echo "Building eve CLI..."
+	go build -o bin/eve ./cmd/eve
+
+run-fs-example: build-cli ## Validate the filesystem-first example agent
+	@echo "Validating filesystem-first example agent..."
+	./bin/eve validate examples/filesystem-agent/assistant
 
 test: ## Run tests
 	@echo "Running tests..."

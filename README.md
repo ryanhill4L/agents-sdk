@@ -1,419 +1,189 @@
 # Go Agents SDK
 
-A powerful Go SDK for building AI agents with tools, guardrails, memory, and multi-provider support. Create sophisticated AI systems that can make decisions, use tools, collaborate through handoffs, and maintain conversation context.
+A Go SDK for building AI agents, reimagined around a **filesystem-first**
+design inspired by [Vercel's Eve](https://vercel.com/blog/introducing-eve).
+Core agent capabilities live in conventional files and folders, so projects are
+easy to inspect, extend, and operate — while the underlying engine remains a
+plain Go library with multi-provider support, tools, skills, handoffs,
+guardrails, memory, and tracing.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/ryanhill4L/agents-sdk.svg)](https://pkg.go.dev/github.com/ryanhill4L/agents-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ryanhill4L/agents-sdk)](https://goreportcard.com/report/github.com/ryanhill4L/agents-sdk)
 
-## Features
+## The filesystem is the authoring interface
 
-### **Multi-Provider AI Integration**
-- **OpenAI** - GPT-4, GPT-4 Turbo, GPT-3.5 Turbo
-- **Anthropic** - Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku  
-- **Google** - Gemini 2.0 Flash, Gemini 1.5 Pro
-- Unified API across all providers with automatic failover
+An agent is a directory. Conventional files describe its behaviour:
 
-### **Powerful Tool System**
-- **Function Tools** - Convert Go functions into AI-callable tools with automatic schema generation
-- **Type Safety** - Automatic parameter validation and type conversion
-- **Parallel Execution** - Tools can run concurrently for improved performance
-- **Error Handling** - Comprehensive error propagation and context
-
-### **Agent Handoffs & Orchestration**
-- **Smart Routing** - Agents can delegate tasks to specialized sub-agents
-- **Context Preservation** - Full conversation context maintained across handoffs
-- **Circular Detection** - Prevents infinite handoff loops with validation
-- **Execution Tracking** - Complete audit trail of agent interactions
-
-### **Guardrails & Safety**
-- **Input Validation** - Screen requests before processing
-- **Output Filtering** - Validate responses before returning
-- **Custom Guardrails** - Implement domain-specific safety checks
-- **Privacy Protection** - Built-in data protection patterns
-
-### **Memory & Sessions**
-- **SQLite Backend** - Persistent conversation storage
-- **Session Management** - Load and save conversation history
-- **Context Windows** - Intelligent context management for long conversations
-- **Multi-Session** - Support for concurrent user sessions
-
-### **Observability & Monitoring**
-- **Distributed Tracing** - Full request/response tracing
-- **Performance Metrics** - Token usage, latency, and success rates
-- **Debug Logging** - Detailed execution logs for troubleshooting
-- **Console Tracer** - Built-in development debugging
-
-## Quick Start
-
-### Installation
-
-```bash
-go get github.com/ryanhill4L/agents-sdk
+```
+myagent/
+  agent.yaml            # model, provider, temperature, tools
+  instructions.md       # system prompt
+  skills/
+    refunds.md          # on-demand knowledge (YAML front-matter + markdown body)
+  subagents/
+    billing/            # a delegated agent (handoff), same layout recursively
+      agent.yaml
+      instructions.md
+  schedules/
+    nightly.yaml        # cron triggers
+  channels/             # integration adapters (HTTP is built in)
 ```
 
-### Basic Example
+| Path             | Purpose                                                            |
+|------------------|-------------------------------------------------------------------|
+| `agent.yaml`     | Model, provider, sampling params, and the tools the agent may use |
+| `instructions.md`| The system prompt                                                  |
+| `skills/*.md`    | Procedures/knowledge surfaced to the model and loaded on demand   |
+| `subagents/<n>/` | Specialized agents the parent can hand off to                     |
+| `schedules/*.yaml` | Cron expressions that trigger the agent autonomously            |
+
+### `agent.yaml`
+
+```yaml
+name: assistant
+provider: openai          # openai | anthropic | gemini | ollama
+model: gpt-4o
+temperature: 0.7
+max_tokens: 1024
+tools:
+  - current_time
+  - add
+```
+
+### A skill (`skills/weather.md`)
+
+```markdown
+---
+name: weather
+description: How to answer questions about the weather using a public API.
+---
+1. Determine the location the user is asking about.
+2. Use the `http_get` tool to fetch https://wttr.in/<location>?format=3.
+3. Summarize the result in one friendly sentence.
+```
+
+Skills are not dumped into the prompt. Instead the model sees a **catalog** of
+skill names and descriptions and pulls a skill's full body only when needed,
+via the built-in `load_skill` tool.
+
+## The `eve` CLI
+
+```bash
+go build -o eve ./cmd/eve
+
+eve init myagent                     # scaffold a new agent directory
+eve validate myagent                 # load and report what was found (no API key needed)
+eve run myagent "what time is it?"   # run a single turn
+eve dev myagent                      # serve over HTTP: POST /chat {"input": "..."}
+eve schedules myagent                # run the agent's cron schedules
+```
+
+Provider credentials come from the environment:
+
+```bash
+export PROVIDER=openai            # optional; otherwise auto-detected
+export OPENAI_API_KEY=...         # or ANTHROPIC_API_KEY / GEMINI_API_KEY / OLLAMA_HOST
+```
+
+> Because Go tools are compiled functions, `agent.yaml` references tools **by
+> name**. The CLI ships a small builtin registry (`current_time`, `add`,
+> `http_get`). To use your own Go tools, load the agent from your own program
+> with a custom registry (see below).
+
+## Library API
+
+The CLI is a thin shell over the library. Load a filesystem agent with your own
+tools and run it:
 
 ```go
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
+	"context"
+	"fmt"
 
-    "github.com/ryanhill4L/agents-sdk/pkg/agents"
-    "github.com/ryanhill4L/agents-sdk/pkg/providers"
-    "github.com/ryanhill4L/agents-sdk/pkg/tools"
-    "github.com/ryanhill4L/agents-sdk/pkg/tracing"
+	"github.com/ryanhill4L/agents-sdk/pkg/agents"
+	"github.com/ryanhill4L/agents-sdk/pkg/loader"
+	"github.com/ryanhill4L/agents-sdk/pkg/providers"
+	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 )
 
-// Define a simple tool
-func add(a, b int) int {
-    return a + b
-}
-
 func main() {
-    // Create a tool from your function
-    addTool, err := tools.NewFunctionTool("add", "Adds two numbers", add)
-    if err != nil {
-        log.Fatal(err)
-    }
+	// 1. Register your Go tools by name.
+	reg := tools.NewRegistry()
+	reg.MustRegister(tools.NewTool("add", "Adds two numbers",
+		func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			return args["a"].(float64) + args["b"].(float64), nil
+		},
+		tools.Param{Name: "a", Type: "number", Required: true},
+		tools.Param{Name: "b", Type: "number", Required: true},
+	))
 
-    // Create an agent
-    agent := agents.NewAgent("Math Assistant",
-        agents.WithInstructions("You are a helpful math assistant."),
-        agents.WithModel("gpt-4"),
-        agents.WithTools(addTool),
-    )
+	// 2. Load the agent from the filesystem.
+	agent, err := loader.Load("myagent", reg)
+	if err != nil {
+		panic(err)
+	}
 
-    // Create a provider (OpenAI, Anthropic, or Gemini)
-    provider, err := providers.NewOpenAIProviderFromEnv()
-    if err != nil {
-        log.Fatal(err)
-    }
+	// 3. Run it with a provider resolved from the environment.
+	provider, _ := providers.Resolve(agent.Provider)
+	runner := agents.NewRunner(agents.WithProvider(provider))
 
-    // Create a runner
-    runner := agents.NewRunner(
-        agents.WithProvider(provider),
-        agents.WithTracer(tracing.NewConsoleTracer()),
-    )
-
-    // Run the agent
-    ctx := context.Background()
-    result, err := runner.Run(ctx, agent, "What is 15 + 27?")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Response: %s\n", result.FinalOutput)
-    fmt.Printf("Tokens: %d, Duration: %v\n", 
-        result.Metrics.TotalTokens, result.Metrics.Duration)
+	result, err := runner.Run(context.Background(), agent, "What is 21 + 21?")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(result.FinalOutput)
 }
 ```
+
+You can also build agents entirely in code with functional options
+(`agents.NewAgent`, `agents.WithInstructions`, `agents.WithTools`,
+`agents.WithSkills`, `agents.WithHandoffs`, …) — the loader simply translates
+files into those calls.
+
+## Packages
+
+| Package           | Responsibility                                                        |
+|-------------------|-----------------------------------------------------------------------|
+| `pkg/agents`      | `Agent`, `Runner`, the turn loop, handoffs, skills wiring             |
+| `pkg/loader`      | Builds an `Agent` from a directory (`agent.yaml`, `instructions.md`, …) |
+| `pkg/skills`      | Skill parsing, the catalog, and the `load_skill` builtin tool         |
+| `pkg/tools`       | `Tool` interface, `Registry`, `FunctionTool` (reflection), `SimpleTool` |
+| `pkg/channels`    | Integration adapters; built-in HTTP channel (powers `eve dev`)        |
+| `pkg/schedules`   | Cron parsing and a dependency-free scheduler                          |
+| `pkg/providers`   | OpenAI, Anthropic, Gemini, and Ollama integrations + `Resolve`        |
+| `pkg/memory`      | SQLite-backed session persistence                                     |
+| `pkg/guardrails`  | Pluggable input validation                                            |
+| `pkg/tracing`     | Span-based observability (no-op and console tracers)                  |
+
+## Providers
+
+| Provider  | Env var             | Notes                           |
+|-----------|---------------------|---------------------------------|
+| OpenAI    | `OPENAI_API_KEY`    | GPT-4o and friends              |
+| Anthropic | `ANTHROPIC_API_KEY` | Claude models                   |
+| Gemini    | `GEMINI_API_KEY`    | Google Gemini                   |
+| Ollama    | `OLLAMA_HOST`       | Local models (default `:11434`) |
 
 ## Examples
 
-### Event Scheduling Agent
-A complete example showing agent handoffs, database tools, and guardrails.
+- [`examples/filesystem-agent`](examples/filesystem-agent) — the filesystem-first
+  layout, driven by the `eve` CLI (agent + skill + subagent + schedule).
+- [`examples/basic`](examples/basic), [`examples/multi-agent`](examples/multi-agent),
+  [`examples/json`](examples/json), [`examples/event-scheduler`](examples/event-scheduler)
+  — code-first usage of the library API.
+
+## Development
 
 ```bash
-cd examples/event-scheduler
-export OPENAI_API_KEY="your-key-here"
-go run main.go
-```
-
-**Features:**
-- Multi-agent orchestration with triage routing
-- Database integration with SQLite
-- Conflict detection and scheduling optimization
-- Privacy guardrails for sensitive data
-
-### Basic Tools Demo
-Simple demonstration of function tools and multi-provider support.
-
-```bash
-cd examples/basic
-export OPENAI_API_KEY="your-openai-key"
-export ANTHROPIC_API_KEY="your-anthropic-key"
-export GEMINI_API_KEY="your-gemini-key"
-go run main.go
-```
-
-### JSON Structure Example
-Shows structured output with type-safe JSON parsing.
-
-```bash
-cd examples/json
-go run main.go
-```
-
-## Architecture
-
-### Core Components
-
-```
-agents-sdk/
-├── pkg/
-│   ├── agents/          # Core agent framework
-│   │   ├── agent.go     # Agent definition and configuration
-│   │   ├── runner.go    # Execution engine with turn management
-│   │   └── types.go     # Type definitions and interfaces
-│   ├── tools/           # Tool system for agent capabilities
-│   │   ├── function_tool.go  # Go function to tool conversion
-│   │   └── tools.go     # Tool interfaces and utilities
-│   ├── providers/       # AI model provider integrations
-│   │   ├── openai_provider.go    # OpenAI GPT models
-│   │   ├── anthropic_provider.go # Anthropic Claude models
-│   │   └── gemini_provider.go    # Google Gemini models
-│   ├── memory/          # Session management and persistence
-│   │   ├── session.go   # Session interface
-│   │   └── sqlite_session.go # SQLite implementation
-│   ├── guardrails/      # Safety and validation system
-│   │   └── guardrail.go # Guardrail interfaces
-│   └── tracing/         # Observability and monitoring
-│       └── tracer.go    # Tracing interfaces and console tracer
-└── examples/            # Complete working examples
-    ├── event-scheduler/ # Multi-agent scheduling system
-    ├── basic/          # Simple tool demonstration
-    └── json/           # Structured output example
-```
-
-### Agent Lifecycle
-
-1. **Initialization** - Agent created with tools, instructions, and configuration
-2. **Validation** - Check for circular handoffs and required dependencies
-3. **Execution** - Runner manages conversation turns and tool calls
-4. **Tool Calling** - Automatic function execution with type conversion
-5. **Handoffs** - Optional delegation to specialized agents
-6. **Response** - Final output with metrics and tracing data
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# AI Provider API Keys
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."  
-export GEMINI_API_KEY="..."
-
-# Optional Configuration
-export AGENTS_DEBUG=true
-export AGENTS_TRACE_LEVEL=debug
-export AGENTS_MAX_TOKENS=4096
-```
-
-### Provider Configuration
-
-```go
-// OpenAI
-provider, err := providers.NewOpenAIProviderWithKey("sk-...")
-
-// Anthropic
-provider, err := providers.NewAnthropicProviderWithKey("sk-ant-...")
-
-// Gemini
-provider, err := providers.NewGeminiProviderWithKey("gemini-key")
-
-// From environment
-provider, err := providers.NewOpenAIProviderFromEnv()
-```
-
-### Agent Configuration
-
-```go
-agent := agents.NewAgent("Agent Name",
-    agents.WithInstructions("Your role and instructions"),
-    agents.WithModel("gpt-4"),
-    agents.WithTools(tool1, tool2),
-    agents.WithHandoffs(subAgent1, subAgent2),
-    agents.WithGuardrails(guardrail),
-    agents.WithTemperature(0.7),
-)
-```
-
-### Runner Configuration
-
-```go
-runner := agents.NewRunner(
-    agents.WithProvider(provider),
-    agents.WithTracer(tracing.NewConsoleTracer()),
-    agents.WithMaxTurns(10),
-    agents.WithParallelTools(true),
-)
-```
-
-## Advanced Features
-
-### Custom Tools
-
-```go
-// Database query tool
-func queryDB(query string) ([]map[string]any, error) {
-    // Your database logic
-    return results, nil
-}
-
-tool, err := tools.NewFunctionTool(
-    "query_database", 
-    "Execute SQL queries", 
-    queryDB,
-)
-```
-
-### Agent Handoffs
-
-```go
-// Specialized agents
-dataAgent := agents.NewAgent("Data Analyst", ...)
-reportAgent := agents.NewAgent("Report Generator", ...)
-
-// Orchestrator with handoffs
-orchestrator := agents.NewAgent("Coordinator",
-    agents.WithHandoffs(dataAgent, reportAgent),
-    agents.WithInstructions("Route tasks to specialists..."),
-)
-```
-
-### Memory Integration
-
-```go
-// Session-aware runner
-session, err := memory.NewSQLiteSession("./sessions.db", "user123")
-runner := agents.NewRunner(
-    agents.WithProvider(provider),
-    agents.WithSession(session),
-)
-
-// Conversation history is automatically preserved
-```
-
-### Custom Guardrails
-
-```go
-type MyGuardrail struct{}
-
-func (g *MyGuardrail) Name() string { return "my_check" }
-func (g *MyGuardrail) Description() string { return "Custom validation" }
-func (g *MyGuardrail) Validate(content string) error {
-    if containsSensitiveData(content) {
-        return fmt.Errorf("sensitive data detected")
-    }
-    return nil
-}
-
-agent := agents.NewAgent("Secure Agent",
-    agents.WithGuardrails(&MyGuardrail{}),
-)
-```
-
-## API Reference
-
-### Core Types
-
-```go
-type Agent struct {
-    // Agent configuration and state
-}
-
-type RunResult struct {
-    FinalOutput string
-    Metrics     RunMetrics
-    TraceID     string
-}
-
-type RunMetrics struct {
-    TotalTurns   int
-    ToolCalls    int
-    Handoffs     int
-    TotalTokens  int
-    Duration     time.Duration
-}
-```
-
-### Key Interfaces
-
-```go
-type Provider interface {
-    Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error)
-}
-
-type Tool interface {
-    Name() string
-    Description() string
-    Execute(ctx context.Context, args map[string]any) (any, error)
-}
-
-type Guardrail interface {
-    Name() string
-    Description() string
-    Validate(content string) error
-}
-```
-
-## Performance & Scalability
-
-- **Concurrent Tool Execution** - Multiple tools can run in parallel
-- **Efficient Context Management** - Smart context window handling
-- **Connection Pooling** - Reused HTTP connections to providers
-- **Memory Optimization** - Efficient session storage and retrieval
-- **Timeout Handling** - Configurable timeouts for all operations
-
-## Security & Privacy
-
-- **API Key Management** - Secure credential handling
-- **Input Sanitization** - Automatic validation of user inputs
-- **Output Filtering** - Guardrails for response validation
-- **Data Isolation** - Session-based data separation
-- **Audit Logging** - Complete tracing of all operations
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-git clone https://github.com/ryanhill4L/agents-sdk.git
-cd agents-sdk
-go mod download
-go test ./...
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Run specific package
-go test ./pkg/agents
+make build          # build all packages
+make build-cli      # build the eve CLI into bin/eve
+make test           # run tests
+make run-fs-example # validate the filesystem-first example
+make check          # fmt + vet + tidy
 ```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Documentation**: [pkg.go.dev](https://pkg.go.dev/github.com/ryanhill4L/agents-sdk)
-- **Quickstart**: See [QUICKSTART.md](QUICKSTART.md)
-- **Discussions**: [GitHub Discussions](https://github.com/ryanhill4L/agents-sdk/discussions)
-- **Bug Reports**: [GitHub Issues](https://github.com/ryanhill4L/agents-sdk/issues)
-
-## Roadmap
-
-- [ ] **Stream Processing** - Real-time streaming responses
-- [ ] **Plugin System** - Dynamic tool loading
-- [ ] **Workflow Engine** - Complex multi-step processes
-- [ ] **Vector Memory** - Semantic memory with embeddings
-- [ ] **Web Interface** - Browser-based agent management
-- [ ] **Kubernetes Operator** - Cloud-native deployment
-
----
-
-Built with ❤️ by [Ryan Hill](https://github.com/ryanhill4L)
+MIT — see [LICENSE](LICENSE).

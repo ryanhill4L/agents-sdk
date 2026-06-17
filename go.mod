@@ -10,6 +10,7 @@ require (
 	github.com/openai/openai-go v1.12.0
 	golang.org/x/sync v0.16.0
 	google.golang.org/genai v1.21.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

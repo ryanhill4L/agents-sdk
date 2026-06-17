@@ -139,7 +139,7 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 		}
 
 		// Get LLM completion
-		toolDefs := convertToolsToProviders(currentAgent.Tools)
+		toolDefs := convertToolsToProviders(currentAgent.EffectiveTools())
 		completion, err := r.provider.Complete(ctx.Context, currentAgent, messagesToProviders(messages), toolDefs)
 		if err != nil {
 			return nil, fmt.Errorf("completion failed: %w", err)
@@ -273,9 +273,9 @@ func (r *Runner) executeTools(ctx *RunContext, agent *Agent, toolCalls []ToolCal
 	return responses, nil
 }
 
-// findTool locates a tool by name
+// findTool locates a tool by name, including builtins such as load_skill.
 func (r *Runner) findTool(agent *Agent, name string) tools.Tool {
-	for _, tool := range agent.Tools {
+	for _, tool := range agent.EffectiveTools() {
 		if tool.Name() == name {
 			return tool
 		}

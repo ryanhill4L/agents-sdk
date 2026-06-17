@@ -6,6 +6,7 @@ import (
 	"github.com/ryanhill4L/agents-sdk/pkg/guardrails"
 	"github.com/ryanhill4L/agents-sdk/pkg/memory"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
+	"github.com/ryanhill4L/agents-sdk/pkg/skills"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
 )
@@ -51,6 +52,22 @@ func WithHandoffs(agents ...*Agent) AgentOption {
 func WithGuardrails(guardrails ...guardrails.Guardrail) AgentOption {
 	return func(a *Agent) {
 		a.Guardrails = append(a.Guardrails, guardrails...)
+	}
+}
+
+// WithSkills adds on-demand skills to the agent. Their catalog is appended to
+// the system prompt and a load_skill tool is exposed so the model can pull a
+// skill's full body when needed.
+func WithSkills(s ...skills.Skill) AgentOption {
+	return func(a *Agent) {
+		a.Skills = append(a.Skills, s...)
+	}
+}
+
+// WithProviderName records the preferred provider name for this agent (advisory).
+func WithProviderName(provider string) AgentOption {
+	return func(a *Agent) {
+		a.Provider = provider
 	}
 }
 

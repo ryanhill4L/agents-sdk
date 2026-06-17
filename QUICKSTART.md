@@ -1,6 +1,34 @@
 # Go Agents SDK Quickstart
 
-Build an AI agent that manages event scheduling and detects overlaps in user schedules.
+## Fastest path: the filesystem-first `eve` CLI
+
+An agent is just a directory of files. Scaffold, inspect, and run one in under a
+minute:
+
+```bash
+# From the repo root, build the CLI:
+go build -o eve ./cmd/eve
+
+# Scaffold a new agent and see what it contains:
+./eve init myagent
+./eve validate myagent
+
+# Provide a provider key, then run it:
+export OPENAI_API_KEY=...        # or ANTHROPIC_API_KEY / GEMINI_API_KEY / OLLAMA_HOST
+./eve run myagent "What time is it, and what is 2 + 2?"
+
+# Or serve it over HTTP:
+./eve dev myagent
+#   curl -s localhost:8080/chat -d '{"input":"hello"}'
+```
+
+Edit `myagent/agent.yaml` (model, provider, tools), `myagent/instructions.md`
+(system prompt), and add `myagent/skills/*.md` for on-demand knowledge. See the
+[README](README.md) and [`examples/filesystem-agent`](examples/filesystem-agent)
+for the full layout.
+
+The rest of this guide builds the same kind of agent **in code** with the
+library API, using event scheduling as a worked example.
 
 ## Prerequisites
 

@@ -37,8 +37,24 @@ go test ./pkg/agents
 
 - **`pkg/tools/`** - Tool system for agent capabilities
   - `FunctionTool` - Wraps Go functions as tools using reflection
-  - Automatic schema generation from function signatures
+  - `SimpleTool` (`NewTool`) - Tools with explicit, named parameter schemas
+  - `Registry` - Name-indexed tool collection used by the filesystem loader
   - Support for context-aware tool execution
+
+- **`pkg/loader/`** - Filesystem-first agent loading
+  - Builds an `Agent` from a directory (`agent.yaml`, `instructions.md`, `skills/`, `subagents/`)
+  - Resolves tools declared by name in `agent.yaml` against a `tools.Registry`
+  - Loads subagents recursively as handoffs
+
+- **`pkg/skills/`** - On-demand knowledge (Eve-style skills)
+  - Markdown files with YAML front-matter (`name`, `description`)
+  - Catalog is appended to the system prompt; bodies are pulled via the `load_skill` builtin tool
+
+- **`pkg/channels/`** - Integration adapters
+  - `Channel` interface; built-in `HTTPChannel` powers `eve dev` (POST /chat)
+
+- **`pkg/schedules/`** - Cron-based autonomous triggers
+  - Dependency-free 5-field cron parser/matcher and a minute-tick scheduler
 
 - **`pkg/memory/`** - Session management and persistence
   - SQLite-based session storage for conversation history
@@ -56,23 +72,40 @@ go test ./pkg/agents
   - Distributed tracing support for agent runs
   - Span tracking for debugging and performance analysis
 
+### The `cmd/eve` CLI
+
+The `eve` binary is a thin shell over the library:
+
+- `eve init <dir>` - scaffold a new agent directory
+- `eve validate <dir>` - load an agent and report what was found (no API key needed)
+- `eve run <dir> [input]` - run a single turn
+- `eve dev <dir> [addr]` - serve the agent over HTTP via the HTTP channel
+- `eve schedules <dir>` - run the agent's cron schedules
+
+Because Go tools are compiled, the CLI resolves `agent.yaml` tool names against a
+small builtin registry (`current_time`, `add`, `http_get`). Custom Go tools are
+wired by calling `loader.Load(dir, registry)` from your own program.
+
 ### Key Patterns
 
-- **Agent Handoffs**: Agents can delegate to other agents with context
-- **Tool Execution**: Supports both parallel and sequential tool execution
-- **Turn Management**: Configurable max turns with timeout protection
-- **Structured Output**: Type-safe output schemas with validation
-- **Error Handling**: Comprehensive error propagation and context
+- **Filesystem-first**: agents are directories; the loader translates files into `agents.NewAgent` option calls
+- **Skills on demand**: catalog in the prompt + `load_skill` builtin tool, rather than inlining all knowledge
+- **Agent Handoffs**: subagent directories become handoff targets
+- **Tool Execution**: supports both parallel and sequential tool execution
+- **Turn Management**: configurable max turns with timeout protection
+- **Error Handling**: comprehensive error propagation and context
 
 ### Dependencies
 
 - `github.com/google/uuid` - UUID generation
 - `github.com/mattn/go-sqlite3` - SQLite database driver
 - `golang.org/x/sync/errgroup` - Concurrent execution patterns
+- `gopkg.in/yaml.v3` - YAML parsing for `agent.yaml`, skills front-matter, schedules
+- Provider SDKs: `anthropic-sdk-go`, `openai-go`, `ollama`, `google.golang.org/genai`
 
 ## Development Notes
 
-- Missing packages (`providers`, `guardrails`, `tracing`) need implementation
-- No test files currently exist - tests should be added as `*_test.go`
+- Provider, guardrail, and tracing packages are implemented
+- Tests live alongside code as `*_test.go` (loader, skills, schedules, tools, agents)
 - Module uses Go 1.24.3
-- README.md and Makefile are empty and should be populated
+- Build the CLI with `make build-cli`; validate the example with `make run-fs-example`

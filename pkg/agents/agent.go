@@ -2,9 +2,11 @@ package agents
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/guardrails"
+	"github.com/ryanhill4L/agents-sdk/pkg/skills"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 )
 
@@ -21,6 +23,14 @@ type Agent struct {
 	Tools      []tools.Tool
 	Handoffs   []*Agent
 	Guardrails []guardrails.Guardrail
+	Skills     []skills.Skill
+
+	// Provider names the LLM backend (openai, anthropic, gemini, ollama).
+	// It is advisory: a Runner with an explicit provider always wins.
+	Provider string
+
+	// Dir records the directory an agent was loaded from, when applicable.
+	Dir string
 
 	// Configuration
 	OutputType  OutputSchema
@@ -113,7 +123,35 @@ func (a *Agent) GetName() string {
 }
 
 func (a *Agent) GetInstructions() string {
-	return a.Instructions
+	if len(a.Skills) == 0 {
+		return a.Instructions
+	}
+	catalog := skills.Catalog(a.Skills)
+	if a.Instructions == "" {
+		return catalog
+	}
+	return strings.TrimRight(a.Instructions, "\n") + "\n\n" + catalog
+}
+
+// EffectiveTools returns the agent's tools plus the builtin load_skill tool when
+// the agent has skills. This is what the Runner exposes to the model so that
+// skills can be pulled on demand.
+func (a *Agent) EffectiveTools() []tools.Tool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if len(a.Skills) == 0 {
+		return a.Tools
+	}
+	for _, t := range a.Tools {
+		if t.Name() == skills.LoadSkillToolName {
+			return a.Tools // already present
+		}
+	}
+	effective := make([]tools.Tool, 0, len(a.Tools)+1)
+	effective = append(effective, a.Tools...)
+	effective = append(effective, skills.NewLoadSkillTool(a.Skills))
+	return effective
 }
 
 func (a *Agent) GetModel() string {
@@ -141,12 +179,17 @@ func (a *Agent) Clone() *Agent {
 		Name:         a.Name,
 		Instructions: a.Instructions,
 		Model:        a.Model,
+		Provider:     a.Provider,
+		Dir:          a.Dir,
 		OutputType:   a.OutputType,
 		Temperature:  a.Temperature,
 		MaxTokens:    a.MaxTokens,
 		TopP:         a.TopP,
 		handoffMap:   make(map[string]*Agent),
 	}
+
+	clone.Skills = make([]skills.Skill, len(a.Skills))
+	copy(clone.Skills, a.Skills)
 
 	// Deep copy tools
 	clone.Tools = make([]tools.Tool, len(a.Tools))
