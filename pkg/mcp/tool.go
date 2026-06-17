@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -77,11 +78,12 @@ type Manager struct {
 }
 
 // ConnectAll connects to every server in cfgs. If any connection fails, all
-// already-opened connections are closed and the error is returned.
-func ConnectAll(ctx context.Context, cfgs []ServerConfig) (*Manager, error) {
+// already-opened connections are closed and the error is returned. A nil logger
+// disables logging.
+func ConnectAll(ctx context.Context, cfgs []ServerConfig, logger *slog.Logger) (*Manager, error) {
 	m := &Manager{}
 	for _, cfg := range cfgs {
-		client, err := Connect(ctx, cfg)
+		client, err := Connect(ctx, cfg, logger)
 		if err != nil {
 			_ = m.Close()
 			return nil, err

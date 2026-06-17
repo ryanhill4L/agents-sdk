@@ -138,6 +138,42 @@ namespaced by server to avoid collisions. From code, use `mcp.ConnectAll` and
 add `manager.Tools()` to an agent, or just let the loader do it. Remember to
 `defer agent.Close()` to release MCP connections.
 
+## Observability: logging & tracing
+
+Every run is instrumented. The runner emits **structured logs** (`log/slog`) and a
+**span tree** covering the run, each turn, every LLM call, tool execution
+(including skills' `load_skill` and MCP tools), guardrails, and handoffs/
+delegations.
+
+```go
+runner := agents.NewRunner(
+    agents.WithProvider(p),
+    agents.WithLogger(tracing.NewLogger(os.Stderr, slog.LevelDebug)), // structured logs
+    agents.WithTracer(tracing.NewConsoleTracer()),                    // indented span tree
+)
+result, _ := runner.Run(ctx, agent, "hello")
+
+// The full trace tree is always captured programmatically, regardless of tracer:
+for _, span := range result.Traces {
+    fmt.Printf("%*s%s %s\n", span.Depth*2, "", span.Name, span.Duration)
+}
+```
+
+Console trace output looks like:
+
+```
+[trace] agent.run (12.4ms) agent=assistant turns=2 tokens=345
+[trace]   turn (8.1ms) n=0 agent=assistant
+[trace]     llm.complete (6.0ms) model=gpt-4o tokens=210 tool_calls=1
+[trace]     tool.execute (1.2ms) tool=add args={"a":5,"b":3} result_chars=1
+[trace]   turn (3.9ms) n=1 agent=assistant
+[trace]     llm.complete (3.8ms) model=gpt-4o tokens=135 tool_calls=0
+```
+
+Tracers available in `pkg/tracing`: `NewConsoleTracer`, `NewSlogTracer`,
+`NewRecorder` (programmatic capture), and `NewTee` to combine them. With the
+CLI, enable both with `-v`/`--verbose`, or set `EVE_LOG=debug` / `EVE_TRACE=1`.
+
 ## The `eve` CLI
 
 ```bash

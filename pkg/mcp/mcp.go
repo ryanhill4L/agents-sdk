@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
+	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
 )
 
 // Transport names.
@@ -59,10 +61,12 @@ type Client struct {
 	cfg     ServerConfig
 	session *mcpsdk.ClientSession
 	tools   []tools.Tool
+	logger  *slog.Logger
 }
 
-// Connect dials the server described by cfg and lists its tools.
-func Connect(ctx context.Context, cfg ServerConfig) (*Client, error) {
+// Connect dials the server described by cfg and lists its tools. A nil logger
+// disables logging.
+func Connect(ctx context.Context, cfg ServerConfig, logger *slog.Logger) (*Client, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -74,29 +78,33 @@ func Connect(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q: %w", cfg.Name, err)
 	}
-	return connectTransport(ctx, cfg, transport)
+	return connectTransport(ctx, cfg, transport, logger)
 }
 
 // connectTransport connects a client over an arbitrary transport. It is the
 // shared core of Connect and is used by tests with in-memory transports.
-func connectTransport(ctx context.Context, cfg ServerConfig, transport mcpsdk.Transport) (*Client, error) {
+func connectTransport(ctx context.Context, cfg ServerConfig, transport mcpsdk.Transport, logger *slog.Logger) (*Client, error) {
+	log := tracing.OrDiscard(logger)
+
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, connectTimeout)
 		defer cancel()
 	}
 
+	log.Debug("mcp connecting", "server", cfg.Name, "transport", cfg.Transport)
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "agents-sdk", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q: connect: %w", cfg.Name, err)
 	}
 
-	c := &Client{cfg: cfg, session: session}
+	c := &Client{cfg: cfg, session: session, logger: log}
 	if err := c.loadTools(ctx); err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("mcp server %q: %w", cfg.Name, err)
 	}
+	log.Info("mcp connected", "server", cfg.Name, "tools", len(c.tools))
 	return c, nil
 }
 
@@ -126,13 +134,17 @@ func (c *Client) loadTools(ctx context.Context) error {
 		if len(allow) > 0 && !allow[t.Name] {
 			continue
 		}
+		name := namespaced(c.cfg.Name, t.Name)
 		c.tools = append(c.tools, &mcpTool{
 			session:     c.session,
 			rawName:     t.Name,
-			name:        namespaced(c.cfg.Name, t.Name),
+			name:        name,
 			description: t.Description,
 			schema:      convertSchema(t.InputSchema),
 		})
+		if c.logger != nil {
+			c.logger.Debug("mcp tool discovered", "server", c.cfg.Name, "tool", name)
+		}
 	}
 	return nil
 }

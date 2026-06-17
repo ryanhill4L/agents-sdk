@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/guardrails"
@@ -121,6 +122,13 @@ func WithProvider(provider providers.Provider) RunnerOption {
 func WithTracer(tracer tracing.Tracer) RunnerOption {
 	return func(r *Runner) {
 		r.tracer = tracer
+	}
+}
+
+// WithLogger sets the structured logger used for run/turn/tool/handoff events.
+func WithLogger(logger *slog.Logger) RunnerOption {
+	return func(r *Runner) {
+		r.logger = logger
 	}
 }
 

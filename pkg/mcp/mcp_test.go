@@ -30,7 +30,7 @@ func startTestServer(t *testing.T, cfg ServerConfig) *Client {
 		t.Fatalf("server connect: %v", err)
 	}
 
-	client, err := connectTransport(context.Background(), cfg, clientTransport)
+	client, err := connectTransport(context.Background(), cfg, clientTransport, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}

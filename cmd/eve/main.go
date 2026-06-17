@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -21,16 +22,29 @@ import (
 	"github.com/ryanhill4L/agents-sdk/pkg/loader"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
 	"github.com/ryanhill4L/agents-sdk/pkg/schedules"
+	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
 )
 
+// verbose enables debug logging + console tracing (set by -v/--verbose).
+var verbose bool
+
 func main() {
-	if len(os.Args) < 2 {
+	// Strip the global -v/--verbose flag from anywhere in the args.
+	var filtered []string
+	for _, a := range os.Args[1:] {
+		if a == "-v" || a == "--verbose" {
+			verbose = true
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	if len(filtered) == 0 {
 		usage()
 		os.Exit(2)
 	}
 
-	cmd := os.Args[1]
-	args := os.Args[2:]
+	cmd := filtered[0]
+	args := filtered[1:]
 
 	var err error
 	switch cmd {
@@ -69,26 +83,59 @@ Usage:
   eve dev <dir> [addr]    Serve the agent over HTTP (default :8080)
   eve schedules <dir>     Run the agent's cron schedules
 
+Flags:
+  -v, --verbose           Enable debug logging and console tracing
+
 Environment:
   PROVIDER                openai | anthropic | gemini | ollama (else auto-detect)
   OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OLLAMA_HOST
+  EVE_LOG                 debug | info | warn | error (structured logs to stderr)
+  EVE_TRACE               set to any value to enable console tracing
 `)
 }
 
 // loadAgent loads the agent at dir using the CLI's builtin tool registry,
 // connecting any declared MCP servers. Callers should defer agent.Close().
 func loadAgent(dir string) (*agents.Agent, error) {
-	return loader.Load(dir, builtinRegistry())
+	return loader.LoadWithOptions(dir, builtinRegistry(), loader.Options{Logger: buildLogger()})
 }
 
 // newRunner builds a Runner whose provider is resolved from the agent's
-// declared provider (or the environment).
+// declared provider (or the environment), with logging/tracing per flags/env.
 func newRunner(agent *agents.Agent) (*agents.Runner, error) {
 	provider, err := providers.Resolve(agent.Provider)
 	if err != nil {
 		return nil, err
 	}
-	return agents.NewRunner(agents.WithProvider(provider)), nil
+	opts := []agents.RunnerOption{agents.WithProvider(provider)}
+	if logger := buildLogger(); logger != nil {
+		opts = append(opts, agents.WithLogger(logger))
+	}
+	if tracer := buildTracer(); tracer != nil {
+		opts = append(opts, agents.WithTracer(tracer))
+	}
+	return agents.NewRunner(opts...), nil
+}
+
+// buildLogger returns a stderr logger when -v/--verbose or EVE_LOG is set,
+// otherwise nil (the SDK then discards logs).
+func buildLogger() *slog.Logger {
+	level := os.Getenv("EVE_LOG")
+	if verbose {
+		level = "debug"
+	}
+	if level == "" {
+		return nil
+	}
+	return tracing.NewLogger(os.Stderr, tracing.ParseLevel(level))
+}
+
+// buildTracer returns a console tracer when -v/--verbose or EVE_TRACE is set.
+func buildTracer() tracing.Tracer {
+	if verbose || os.Getenv("EVE_TRACE") != "" {
+		return tracing.NewConsoleTracer()
+	}
+	return nil
 }
 
 func cmdValidate(args []string) error {
@@ -96,7 +143,7 @@ func cmdValidate(args []string) error {
 		return fmt.Errorf("usage: eve validate <dir>")
 	}
 	// Skip connecting to MCP servers so validate stays offline.
-	agent, err := loader.LoadWithOptions(args[0], builtinRegistry(), loader.Options{SkipMCP: true})
+	agent, err := loader.LoadWithOptions(args[0], builtinRegistry(), loader.Options{SkipMCP: true, Logger: buildLogger()})
 	if err != nil {
 		return err
 	}

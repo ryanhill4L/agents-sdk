@@ -74,9 +74,11 @@ go test ./pkg/agents
   - Input validation before agent processing
   - Pluggable guardrail architecture
 
-- **`pkg/tracing/`** - Observability and monitoring
-  - Distributed tracing support for agent runs
-  - Span tracking for debugging and performance analysis
+- **`pkg/tracing/`** - Observability: tracing + structured logging
+  - `Tracer`/`Span` with context-propagated depth so spans form a tree; use `tracing.Start`
+  - Tracers: `NewConsoleTracer`, `NewSlogTracer`, `NewRecorder` (programmatic), `NewTee` (combine)
+  - `slog` helpers (`NewLogger`, `DiscardLogger`, `ParseLevel`); runner takes `WithLogger`
+  - The runner spans agent.run → turn → llm.complete / tool.execute / guardrails / handoff.delegate, and fills `RunResult.Traces`
 
 ### The `cmd/eve` CLI
 

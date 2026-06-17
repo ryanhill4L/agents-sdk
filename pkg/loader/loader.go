@@ -14,6 +14,7 @@ package loader
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/ryanhill4L/agents-sdk/pkg/mcp"
 	"github.com/ryanhill4L/agents-sdk/pkg/skills"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
+	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
 )
 
 // Standard filenames and subdirectories within an agent directory.
@@ -74,6 +76,8 @@ type Options struct {
 	// SkipMCP, when true, records declared MCP servers without connecting to
 	// them (used by `eve validate` to stay offline).
 	SkipMCP bool
+	// Logger receives structured load-time logs (nil disables logging).
+	Logger *slog.Logger
 }
 
 // Load builds an agent (and its subagents, recursively) from dir. Tools named in
@@ -117,6 +121,9 @@ func load(dir string, registry *tools.Registry, opts Options, seen map[string]bo
 	if name == "" {
 		name = filepath.Base(abs)
 	}
+
+	log := tracing.OrDiscard(opts.Logger)
+	log.Debug("loading agent", "name", name, "dir", abs)
 
 	agentOpts := []agents.AgentOption{}
 
@@ -200,7 +207,9 @@ func load(dir string, registry *tools.Registry, opts Options, seen map[string]bo
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		mgr, err := mcp.ConnectAll(ctx, cfg.MCP)
+		logger := tracing.OrDiscard(opts.Logger)
+		logger.Info("connecting mcp servers", "agent", name, "count", len(cfg.MCP))
+		mgr, err := mcp.ConnectAll(ctx, cfg.MCP, opts.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("agent %q: %w", name, err)
 		}
