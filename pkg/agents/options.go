@@ -35,16 +35,31 @@ func WithTools(tools ...tools.Tool) AgentOption {
 	}
 }
 
-// WithHandoffs adds handoff agents
+// WithHandoffs adds handoff agents using the default ContextShared mode.
 func WithHandoffs(agents ...*Agent) AgentOption {
 	return func(a *Agent) {
 		a.Handoffs = append(a.Handoffs, agents...)
+		rebuildHandoffMap(a)
+	}
+}
 
-		// Rebuild handoff map
-		a.handoffMap = make(map[string]*Agent)
-		for _, handoff := range a.Handoffs {
-			a.handoffMap[handoff.Name] = handoff
+// WithHandoff adds a single handoff target with an explicit context mode
+// (ContextShared, ContextFresh, or ContextForked).
+func WithHandoff(agent *Agent, mode HandoffMode) AgentOption {
+	return func(a *Agent) {
+		a.Handoffs = append(a.Handoffs, agent)
+		if a.handoffModes == nil {
+			a.handoffModes = make(map[string]HandoffMode)
 		}
+		a.handoffModes[agent.Name] = mode
+		rebuildHandoffMap(a)
+	}
+}
+
+func rebuildHandoffMap(a *Agent) {
+	a.handoffMap = make(map[string]*Agent)
+	for _, handoff := range a.Handoffs {
+		a.handoffMap[handoff.Name] = handoff
 	}
 }
 

@@ -2,10 +2,15 @@ package loader
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/ryanhill4L/agents-sdk/pkg/agents"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 )
 
@@ -82,6 +87,57 @@ tools:
 	}
 	if !hasLoadSkill {
 		t.Error("expected load_skill builtin in EffectiveTools")
+	}
+}
+
+func TestLoadSubagentModes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFile), `name: parent
+model: m
+subagents:
+  worker: forked
+`)
+	sub := filepath.Join(dir, SubagentsDir, "worker")
+	writeFile(t, filepath.Join(sub, ConfigFile), "name: worker\nmodel: m\n")
+
+	agent, err := Load(dir, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := agent.GetHandoffMode("worker"); got != agents.ContextForked {
+		t.Errorf("worker mode = %v, want forked", got)
+	}
+}
+
+func TestLoadInvalidSubagentMode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFile), "name: parent\nmodel: m\nsubagents:\n  worker: sideways\n")
+	writeFile(t, filepath.Join(dir, SubagentsDir, "worker", ConfigFile), "name: worker\nmodel: m\n")
+	if _, err := Load(dir, nil); err == nil {
+		t.Error("expected error for invalid subagent mode")
+	}
+}
+
+func TestLoadRemoteSkill(t *testing.T) {
+	body := "---\nname: remote\ndescription: A remote skill\n---\nbody"
+	sum := sha256.Sum256([]byte(body))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFile), "name: x\nmodel: m\nskills:\n  - source: "+srv.URL+"/s.md\n    sha256: "+hex.EncodeToString(sum[:])+"\n")
+
+	agent, err := LoadWithOptions(dir, nil, Options{
+		SkillCache:   t.TempDir(),
+		AllowedHosts: []string{"127.0.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOptions: %v", err)
+	}
+	if len(agent.Skills) != 1 || agent.Skills[0].Name != "remote" {
+		t.Errorf("skills = %+v, want one 'remote' skill", agent.Skills)
 	}
 }
 

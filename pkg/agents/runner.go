@@ -146,6 +146,10 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 		}
 
 		metrics.TotalTokens += completion.Usage.TotalTokens
+
+		// turnStart marks the history boundary before this assistant turn, used
+		// to fork a clean context for delegated subagents.
+		turnStart := len(messages)
 		messages = append(messages, messageFromProviders(completion.Message))
 
 		// Check for final output
@@ -161,7 +165,7 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 			}, nil
 		}
 
-		// Handle handoffs
+		// Handle legacy provider-driven handoffs (transfer of control).
 		if completion.Handoff != nil {
 			metrics.Handoffs++
 
@@ -174,25 +178,61 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 			continue
 		}
 
-		// Handle tool calls
+		// Handle tool calls, separating handoff tool calls from regular ones.
 		if len(completion.ToolCalls) > 0 {
-			metrics.ToolCalls += len(completion.ToolCalls)
-
-			toolResponses, err := r.executeTools(ctx, currentAgent, toolCallsFromProviders(completion.ToolCalls))
-			if err != nil {
-				return nil, fmt.Errorf("tool execution failed: %w", err)
+			var (
+				normalCalls []ToolCall
+				handoffs    []pendingHandoff
+			)
+			for _, call := range toolCallsFromProviders(completion.ToolCalls) {
+				if sub, mode, ok := currentAgent.HandoffForTool(call.Name); ok {
+					task, _ := call.Arguments["task"].(string)
+					handoffs = append(handoffs, pendingHandoff{call: call, sub: sub, mode: mode, task: task})
+					continue
+				}
+				normalCalls = append(normalCalls, call)
 			}
 
-			// Add tool responses as messages
-			for _, resp := range toolResponses {
-				messages = append(messages, Message{
-					Role:      "tool",
-					Content:   fmt.Sprintf("%v", resp.Content),
-					Timestamp: time.Now(),
-					Metadata: map[string]interface{}{
-						"tool_call_id": resp.ToolCallID,
-					},
-				})
+			if len(normalCalls) > 0 {
+				metrics.ToolCalls += len(normalCalls)
+				toolResponses, err := r.executeTools(ctx, currentAgent, normalCalls)
+				if err != nil {
+					return nil, fmt.Errorf("tool execution failed: %w", err)
+				}
+				for _, resp := range toolResponses {
+					messages = append(messages, toolMessage(resp.ToolCallID, toolContent(resp)))
+				}
+			}
+
+			// Only one handoff is acted on per turn; acknowledge any extras so
+			// their tool calls are still answered.
+			for i := 1; i < len(handoffs); i++ {
+				messages = append(messages, toolMessage(handoffs[i].call.ID,
+					"Ignored: only one handoff is processed per turn."))
+			}
+
+			if len(handoffs) > 0 {
+				h := handoffs[0]
+				metrics.Handoffs++
+
+				if h.mode == ContextShared {
+					messages = append(messages, toolMessage(h.call.ID,
+						fmt.Sprintf("Transferring to %s.", h.sub.Name)))
+					currentAgent = h.sub
+					continue
+				}
+
+				// ContextFresh / ContextForked: delegate and return the result.
+				nested := buildHandoffMessages(h.mode, messages[:turnStart], h.task)
+				subResult, err := r.executeLoop(ctx, h.sub, nested)
+				if err != nil {
+					return nil, fmt.Errorf("subagent %q failed: %w", h.sub.Name, err)
+				}
+				metrics.TotalTokens += subResult.Metrics.TotalTokens
+				metrics.ToolCalls += subResult.Metrics.ToolCalls
+				metrics.Handoffs += subResult.Metrics.Handoffs
+				messages = append(messages, toolMessage(h.call.ID,
+					fmt.Sprintf("%v", subResult.FinalOutput)))
 			}
 
 			continue

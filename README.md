@@ -66,6 +66,49 @@ Skills are not dumped into the prompt. Instead the model sees a **catalog** of
 skill names and descriptions and pulls a skill's full body only when needed,
 via the built-in `load_skill` tool.
 
+### Remote skills (pinned by commit SHA)
+
+Skills can be shared across projects — like a plugin marketplace — by declaring
+**remote sources** in `agent.yaml`. They're resolved **at load time** (never by
+the model at runtime), pinned to an immutable commit SHA, integrity-checked
+against an optional `sha256`, restricted to an allowlisted host, and cached
+locally. This gives you marketplace ergonomics without the prompt-injection/SSRF
+risk of fetching model-supplied URLs.
+
+```yaml
+# agent.yaml — local skills/ are loaded too, in addition to these
+skills:
+  - source: github.com/acme/agent-skills/refunds.md
+    ref: a1b2c3d4         # commit SHA — required for github.com sources
+    sha256: 9f86d0…       # optional integrity pin
+  - source: https://example.com/pinned/skill.md
+    sha256: 0b1c2d…
+```
+
+Defaults are safe: only `raw.githubusercontent.com` / `gist.githubusercontent.com`
+are allowed unless you widen the allowlist via `loader.LoadWithOptions`.
+
+### Subagent handoffs: three context modes
+
+Each subagent handoff can carry context in one of three ways, set per subagent
+in the parent's `agent.yaml`:
+
+```yaml
+subagents:
+  researcher: forked   # shared (default) | fresh | forked
+```
+
+| Mode       | Subagent sees           | Returns to parent? | Use case                          |
+|------------|-------------------------|--------------------|-----------------------------------|
+| **shared** | the full live history   | no (transfers control) | routing/triage                |
+| **fresh**  | only the task           | yes                | clean delegation, no context bleed |
+| **forked** | a copy of the history   | yes                | independent exploration; parent resumes unaffected |
+
+In code: `agents.WithHandoffs(sub)` (shared) or
+`agents.WithHandoff(sub, agents.ContextFresh|ContextForked)`. The model triggers
+a handoff by calling the auto-generated `handoff_<name>` tool; the runner
+intercepts it and applies the configured mode.
+
 ## The `eve` CLI
 
 ```bash

@@ -39,7 +39,8 @@ type Agent struct {
 	TopP        float32
 
 	// Runtime
-	handoffMap map[string]*Agent
+	handoffMap   map[string]*Agent
+	handoffModes map[string]HandoffMode
 }
 
 // NewAgent creates a new agent with the given name and options
@@ -49,8 +50,9 @@ func NewAgent(name string, opts ...AgentOption) *Agent {
 		Model:       "gpt-4",
 		Temperature: 0.7,
 		MaxTokens:   2000,
-		TopP:        1.0,
-		handoffMap:  make(map[string]*Agent),
+		TopP:         1.0,
+		handoffMap:   make(map[string]*Agent),
+		handoffModes: make(map[string]HandoffMode),
 	}
 
 	for _, opt := range opts {
@@ -133,24 +135,33 @@ func (a *Agent) GetInstructions() string {
 	return strings.TrimRight(a.Instructions, "\n") + "\n\n" + catalog
 }
 
-// EffectiveTools returns the agent's tools plus the builtin load_skill tool when
-// the agent has skills. This is what the Runner exposes to the model so that
-// skills can be pulled on demand.
+// EffectiveTools returns the agent's tools plus the builtins the Runner exposes
+// to the model: load_skill (when the agent has skills) and one handoff tool per
+// subagent. The Runner intercepts handoff tool calls.
 func (a *Agent) EffectiveTools() []tools.Tool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	if len(a.Skills) == 0 {
-		return a.Tools
-	}
+	present := make(map[string]bool, len(a.Tools))
 	for _, t := range a.Tools {
-		if t.Name() == skills.LoadSkillToolName {
-			return a.Tools // already present
-		}
+		present[t.Name()] = true
 	}
-	effective := make([]tools.Tool, 0, len(a.Tools)+1)
-	effective = append(effective, a.Tools...)
-	effective = append(effective, skills.NewLoadSkillTool(a.Skills))
+
+	effective := make([]tools.Tool, len(a.Tools))
+	copy(effective, a.Tools)
+
+	if len(a.Skills) > 0 && !present[skills.LoadSkillToolName] {
+		effective = append(effective, skills.NewLoadSkillTool(a.Skills))
+	}
+
+	for _, h := range a.Handoffs {
+		name := handoffToolName(h.Name)
+		if present[name] {
+			continue
+		}
+		effective = append(effective, newHandoffTool(h, a.handoffModes[h.Name]))
+	}
+
 	return effective
 }
 
@@ -186,10 +197,15 @@ func (a *Agent) Clone() *Agent {
 		MaxTokens:    a.MaxTokens,
 		TopP:         a.TopP,
 		handoffMap:   make(map[string]*Agent),
+		handoffModes: make(map[string]HandoffMode),
 	}
 
 	clone.Skills = make([]skills.Skill, len(a.Skills))
 	copy(clone.Skills, a.Skills)
+
+	for k, v := range a.handoffModes {
+		clone.handoffModes[k] = v
+	}
 
 	// Deep copy tools
 	clone.Tools = make([]tools.Tool, len(a.Tools))

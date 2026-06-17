@@ -49,6 +49,7 @@ go test ./pkg/agents
 - **`pkg/skills/`** - On-demand knowledge (Eve-style skills)
   - Markdown files with YAML front-matter (`name`, `description`)
   - Catalog is appended to the system prompt; bodies are pulled via the `load_skill` builtin tool
+  - Remote skills (`RemoteSource`): declared in `agent.yaml`, fetched at load time, pinned by commit SHA, `sha256`-verified, host-allowlisted, and cached (never model-driven runtime fetches)
 
 - **`pkg/channels/`** - Integration adapters
   - `Channel` interface; built-in `HTTPChannel` powers `eve dev` (POST /chat)
@@ -90,7 +91,8 @@ wired by calling `loader.Load(dir, registry)` from your own program.
 
 - **Filesystem-first**: agents are directories; the loader translates files into `agents.NewAgent` option calls
 - **Skills on demand**: catalog in the prompt + `load_skill` builtin tool, rather than inlining all knowledge
-- **Agent Handoffs**: subagent directories become handoff targets
+- **Agent Handoffs**: subagent directories become handoff targets, exposed to the model as `handoff_<name>` tools and intercepted by the Runner
+- **Handoff context modes**: `shared` (transfer control, default), `fresh` (delegate with task only, returns), `forked` (delegate with a copy of history, returns); set per subagent in `agent.yaml` or via `agents.WithHandoff`
 - **Tool Execution**: supports both parallel and sequential tool execution
 - **Turn Management**: configurable max turns with timeout protection
 - **Error Handling**: comprehensive error propagation and context

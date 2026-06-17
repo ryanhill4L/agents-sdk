@@ -245,7 +245,7 @@ func skillNames(a *agents.Agent) string {
 func handoffNames(a *agents.Agent) string {
 	var names []string
 	for _, h := range a.Handoffs {
-		names = append(names, h.Name)
+		names = append(names, fmt.Sprintf("%s (%s)", h.Name, a.GetHandoffMode(h.Name)))
 	}
 	return strings.Join(names, ", ")
 }

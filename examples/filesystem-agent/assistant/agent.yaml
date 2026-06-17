@@ -7,3 +7,14 @@ tools:
   - current_time
   - add
   - http_get
+
+# Per-subagent handoff context mode: shared (default) | fresh | forked.
+subagents:
+  researcher: forked      # researcher gets a copy of context and returns a result
+
+# Remote skills are fetched at load time, pinned by commit SHA + checksum.
+# Local skills in skills/ are always loaded in addition to these.
+# skills:
+#   - source: github.com/acme/agent-skills/refunds.md
+#     ref: a1b2c3d4         # commit SHA (required for github sources)
+#     sha256: 9f86d0...     # optional integrity pin

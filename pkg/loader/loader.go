@@ -12,7 +12,9 @@
 package loader
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,16 +46,42 @@ type Config struct {
 	MaxTokens   int      `yaml:"max_tokens"`
 	TopP        *float32 `yaml:"top_p"`
 	Tools       []string `yaml:"tools"`
+
+	// Subagents maps a subagent directory/name to its handoff context mode
+	// (shared | fresh | forked). Omitted subagents default to shared.
+	Subagents map[string]string `yaml:"subagents"`
+
+	// Skills declares remote skills fetched at load time. Local skills in the
+	// skills/ directory are always loaded in addition to these.
+	Skills []skills.RemoteSource `yaml:"skills"`
+}
+
+// Options configures loading, primarily for fetching remote skills.
+type Options struct {
+	// Context for remote fetches (defaults to context.Background()).
+	Context context.Context
+	// SkillCache is where remote skills are cached (empty uses the OS cache dir).
+	SkillCache string
+	// AllowedHosts restricts remote skill hosts (empty uses the safe default).
+	AllowedHosts []string
+	// HTTPClient overrides the HTTP client used for remote fetches.
+	HTTPClient *http.Client
 }
 
 // Load builds an agent (and its subagents, recursively) from dir. Tools named in
 // agent.yaml are resolved against registry; pass a nil registry only if no agent
 // in the tree declares tools.
 func Load(dir string, registry *tools.Registry) (*agents.Agent, error) {
-	return load(dir, registry, map[string]bool{})
+	return LoadWithOptions(dir, registry, Options{})
 }
 
-func load(dir string, registry *tools.Registry, seen map[string]bool) (*agents.Agent, error) {
+// LoadWithOptions is Load with explicit options (e.g. a skill cache directory or
+// host allowlist for remote skills).
+func LoadWithOptions(dir string, registry *tools.Registry, opts Options) (*agents.Agent, error) {
+	return load(dir, registry, opts, map[string]bool{})
+}
+
+func load(dir string, registry *tools.Registry, opts Options, seen map[string]bool) (*agents.Agent, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -82,26 +110,26 @@ func load(dir string, registry *tools.Registry, seen map[string]bool) (*agents.A
 		name = filepath.Base(abs)
 	}
 
-	opts := []agents.AgentOption{}
+	agentOpts := []agents.AgentOption{}
 
 	instructions, err := readInstructions(filepath.Join(abs, InstructionsFile))
 	if err != nil {
 		return nil, err
 	}
 	if instructions != "" {
-		opts = append(opts, agents.WithInstructions(instructions))
+		agentOpts = append(agentOpts, agents.WithInstructions(instructions))
 	}
 	if cfg.Model != "" {
-		opts = append(opts, agents.WithModel(cfg.Model))
+		agentOpts = append(agentOpts, agents.WithModel(cfg.Model))
 	}
 	if cfg.Provider != "" {
-		opts = append(opts, agents.WithProviderName(cfg.Provider))
+		agentOpts = append(agentOpts, agents.WithProviderName(cfg.Provider))
 	}
 	if cfg.Temperature != nil {
-		opts = append(opts, agents.WithTemperature(*cfg.Temperature))
+		agentOpts = append(agentOpts, agents.WithTemperature(*cfg.Temperature))
 	}
 	if cfg.MaxTokens > 0 {
-		opts = append(opts, agents.WithMaxTokens(cfg.MaxTokens))
+		agentOpts = append(agentOpts, agents.WithMaxTokens(cfg.MaxTokens))
 	}
 
 	// Resolve declared tools.
@@ -113,28 +141,47 @@ func load(dir string, registry *tools.Registry, seen map[string]bool) (*agents.A
 		if err != nil {
 			return nil, fmt.Errorf("agent %q: %w", name, err)
 		}
-		opts = append(opts, agents.WithTools(resolved...))
+		agentOpts = append(agentOpts, agents.WithTools(resolved...))
 	}
 
-	// Load skills.
+	// Load local skills, then any declared remote skills.
 	loadedSkills, err := skills.LoadDir(filepath.Join(abs, SkillsDir))
 	if err != nil {
 		return nil, fmt.Errorf("agent %q: loading skills: %w", name, err)
 	}
+	if len(cfg.Skills) > 0 {
+		fetchOpts := skills.FetchOptions{
+			CacheDir:     opts.SkillCache,
+			AllowedHosts: opts.AllowedHosts,
+			Client:       opts.HTTPClient,
+		}
+		remote, err := skills.FetchAll(opts.Context, cfg.Skills, fetchOpts)
+		if err != nil {
+			return nil, fmt.Errorf("agent %q: fetching remote skills: %w", name, err)
+		}
+		loadedSkills = append(loadedSkills, remote...)
+	}
+	if err := assertUniqueSkillNames(loadedSkills); err != nil {
+		return nil, fmt.Errorf("agent %q: %w", name, err)
+	}
 	if len(loadedSkills) > 0 {
-		opts = append(opts, agents.WithSkills(loadedSkills...))
+		agentOpts = append(agentOpts, agents.WithSkills(loadedSkills...))
 	}
 
 	// Load subagents as handoffs.
-	subagents, err := loadSubagents(filepath.Join(abs, SubagentsDir), registry, seen)
+	subagents, err := loadSubagents(filepath.Join(abs, SubagentsDir), registry, opts, seen)
 	if err != nil {
 		return nil, fmt.Errorf("agent %q: %w", name, err)
 	}
-	if len(subagents) > 0 {
-		opts = append(opts, agents.WithHandoffs(subagents...))
+	for _, sub := range subagents {
+		mode, err := agents.ParseHandoffMode(cfg.Subagents[sub.Name])
+		if err != nil {
+			return nil, fmt.Errorf("agent %q: subagent %q: %w", name, sub.Name, err)
+		}
+		agentOpts = append(agentOpts, agents.WithHandoff(sub, mode))
 	}
 
-	agent := agents.NewAgent(name, opts...)
+	agent := agents.NewAgent(name, agentOpts...)
 	agent.Dir = abs
 
 	if err := agent.Validate(); err != nil {
@@ -143,7 +190,7 @@ func load(dir string, registry *tools.Registry, seen map[string]bool) (*agents.A
 	return agent, nil
 }
 
-func loadSubagents(dir string, registry *tools.Registry, seen map[string]bool) ([]*agents.Agent, error) {
+func loadSubagents(dir string, registry *tools.Registry, opts Options, seen map[string]bool) ([]*agents.Agent, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -157,7 +204,7 @@ func loadSubagents(dir string, registry *tools.Registry, seen map[string]bool) (
 		if !entry.IsDir() {
 			continue
 		}
-		sub, err := load(filepath.Join(dir, entry.Name()), registry, seen)
+		sub, err := load(filepath.Join(dir, entry.Name()), registry, opts, seen)
 		if err != nil {
 			return nil, err
 		}
@@ -165,6 +212,18 @@ func loadSubagents(dir string, registry *tools.Registry, seen map[string]bool) (
 	}
 	sort.Slice(subs, func(i, j int) bool { return subs[i].Name < subs[j].Name })
 	return subs, nil
+}
+
+// assertUniqueSkillNames guards against two skills (local or remote) colliding.
+func assertUniqueSkillNames(loaded []skills.Skill) error {
+	seen := make(map[string]bool, len(loaded))
+	for _, s := range loaded {
+		if seen[s.Name] {
+			return fmt.Errorf("duplicate skill name %q", s.Name)
+		}
+		seen[s.Name] = true
+	}
+	return nil
 }
 
 func readConfig(path string) (Config, error) {
