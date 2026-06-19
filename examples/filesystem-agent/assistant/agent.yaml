@@ -1,0 +1,31 @@
+name: assistant
+provider: openai          # openai | anthropic | gemini | ollama
+model: gpt-4o
+temperature: 0.7
+max_tokens: 1024
+tools:
+  - current_time
+  - add
+  - http_get
+
+# Per-subagent handoff context mode: shared (default) | fresh | forked.
+subagents:
+  researcher: forked      # researcher gets a copy of context and returns a result
+
+# Remote skills are fetched at load time, pinned by commit SHA + checksum.
+# Local skills in skills/ are always loaded in addition to these.
+# skills:
+#   - source: github.com/acme/agent-skills/refunds.md
+#     ref: a1b2c3d4         # commit SHA (required for github sources)
+#     sha256: 9f86d0...     # optional integrity pin
+
+# MCP servers are connected at load time; their tools are added to the agent.
+# mcp:
+#   - name: github             # tools exposed as github_<tool>
+#     transport: stdio
+#     command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+#     env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }
+#   - name: search
+#     transport: http
+#     url: https://mcp.example.com
+#     headers: { Authorization: "Bearer ${SEARCH_KEY}" }

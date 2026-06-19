@@ -1,11 +1,13 @@
 package agents
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/ryanhill4L/agents-sdk/pkg/guardrails"
 	"github.com/ryanhill4L/agents-sdk/pkg/memory"
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
+	"github.com/ryanhill4L/agents-sdk/pkg/skills"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
 )
@@ -34,16 +36,31 @@ func WithTools(tools ...tools.Tool) AgentOption {
 	}
 }
 
-// WithHandoffs adds handoff agents
+// WithHandoffs adds handoff agents using the default ContextShared mode.
 func WithHandoffs(agents ...*Agent) AgentOption {
 	return func(a *Agent) {
 		a.Handoffs = append(a.Handoffs, agents...)
+		rebuildHandoffMap(a)
+	}
+}
 
-		// Rebuild handoff map
-		a.handoffMap = make(map[string]*Agent)
-		for _, handoff := range a.Handoffs {
-			a.handoffMap[handoff.Name] = handoff
+// WithHandoff adds a single handoff target with an explicit context mode
+// (ContextShared, ContextFresh, or ContextForked).
+func WithHandoff(agent *Agent, mode HandoffMode) AgentOption {
+	return func(a *Agent) {
+		a.Handoffs = append(a.Handoffs, agent)
+		if a.handoffModes == nil {
+			a.handoffModes = make(map[string]HandoffMode)
 		}
+		a.handoffModes[agent.Name] = mode
+		rebuildHandoffMap(a)
+	}
+}
+
+func rebuildHandoffMap(a *Agent) {
+	a.handoffMap = make(map[string]*Agent)
+	for _, handoff := range a.Handoffs {
+		a.handoffMap[handoff.Name] = handoff
 	}
 }
 
@@ -51,6 +68,22 @@ func WithHandoffs(agents ...*Agent) AgentOption {
 func WithGuardrails(guardrails ...guardrails.Guardrail) AgentOption {
 	return func(a *Agent) {
 		a.Guardrails = append(a.Guardrails, guardrails...)
+	}
+}
+
+// WithSkills adds on-demand skills to the agent. Their catalog is appended to
+// the system prompt and a load_skill tool is exposed so the model can pull a
+// skill's full body when needed.
+func WithSkills(s ...skills.Skill) AgentOption {
+	return func(a *Agent) {
+		a.Skills = append(a.Skills, s...)
+	}
+}
+
+// WithProviderName records the preferred provider name for this agent (advisory).
+func WithProviderName(provider string) AgentOption {
+	return func(a *Agent) {
+		a.Provider = provider
 	}
 }
 
@@ -89,6 +122,13 @@ func WithProvider(provider providers.Provider) RunnerOption {
 func WithTracer(tracer tracing.Tracer) RunnerOption {
 	return func(r *Runner) {
 		r.tracer = tracer
+	}
+}
+
+// WithLogger sets the structured logger used for run/turn/tool/handoff events.
+func WithLogger(logger *slog.Logger) RunnerOption {
+	return func(r *Runner) {
+		r.logger = logger
 	}
 }
 

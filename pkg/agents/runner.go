@@ -2,7 +2,10 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,13 +13,13 @@ import (
 	"github.com/ryanhill4L/agents-sdk/pkg/providers"
 	"github.com/ryanhill4L/agents-sdk/pkg/tools"
 	"github.com/ryanhill4L/agents-sdk/pkg/tracing"
-	"golang.org/x/sync/errgroup"
 )
 
 // Runner executes agent workflows
 type Runner struct {
 	provider providers.Provider
 	tracer   tracing.Tracer
+	logger   *slog.Logger
 	session  memory.Session
 
 	maxTurns      int
@@ -26,11 +29,11 @@ type Runner struct {
 
 // RunResult contains the execution results
 type RunResult struct {
-	FinalOutput interface{}    `json:"final_output"`
-	Messages    []Message      `json:"messages"`
-	Agent       *Agent         `json:"-"`
-	Traces      []tracing.Span `json:"traces,omitempty"`
-	Metrics     RunMetrics     `json:"metrics"`
+	FinalOutput interface{}          `json:"final_output"`
+	Messages    []Message            `json:"messages"`
+	Agent       *Agent               `json:"-"`
+	Traces      []tracing.SpanRecord `json:"traces,omitempty"`
+	Metrics     RunMetrics           `json:"metrics"`
 }
 
 // RunMetrics contains execution metrics
@@ -63,27 +66,50 @@ func NewRunner(opts ...RunnerOption) *Runner {
 		r.tracer = tracing.NewNoOpTracer()
 	}
 
+	if r.logger == nil {
+		r.logger = tracing.DiscardLogger()
+	}
+
 	return r
 }
 
 // Run executes the agent workflow asynchronously
-func (r *Runner) Run(ctx context.Context, agent *Agent, input string) (*RunResult, error) {
-	// Create run context
+func (r *Runner) Run(ctx context.Context, agent *Agent, input string) (result *RunResult, err error) {
+	sessionID := uuid.New().String()
+	traceID := uuid.New().String()
+
+	// Tee the configured tracer with a recorder so the trace tree is also
+	// available programmatically via RunResult.Traces.
+	recorder := tracing.NewRecorder()
+	tracer := tracing.NewTee(r.tracer, recorder)
+
+	// Apply timeout, then open the root span.
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+
+	ctx, rootSpan := tracing.Start(ctx, tracer, "agent.run",
+		tracing.A("agent", agent.Name),
+		tracing.A("session_id", sessionID),
+		tracing.A("input_chars", len(input)),
+	)
+	// End the root span, then attach the full recorded trace tree to the result.
+	defer func() {
+		rootSpan.End()
+		if result != nil {
+			result.Traces = recorder.Records()
+		}
+	}()
+
+	logger := r.logger.With("agent", agent.Name, "session_id", sessionID, "trace_id", traceID)
+	logger.Info("run started", "input_chars", len(input), "max_turns", r.maxTurns)
+
 	runCtx := &RunContext{
 		Context:   ctx,
-		SessionID: uuid.New().String(),
-		TraceID:   uuid.New().String(),
+		SessionID: sessionID,
+		TraceID:   traceID,
 		MaxTurns:  r.maxTurns,
 		Variables: make(map[string]interface{}),
 	}
-
-	// Start tracing
-	ctx, rootSpan := r.tracer.StartSpan(ctx, "agent.run")
-	defer r.tracer.EndSpan(rootSpan)
-
-	// Apply timeout
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
 
 	// Initialize messages
 	messages := []Message{
@@ -98,20 +124,41 @@ func (r *Runner) Run(ctx context.Context, agent *Agent, input string) (*RunResul
 	if r.session != nil {
 		history, err := r.session.GetItems(ctx, 100)
 		if err != nil {
+			rootSpan.SetError(err)
+			logger.Error("session load failed", "error", err)
 			return nil, fmt.Errorf("failed to load session: %w", err)
 		}
+		logger.Debug("session history loaded", "messages", len(history))
 		messages = append(messagesFromMemory(history), messages...)
 	}
 
 	// Execute agent loop
-	result, err := r.executeLoop(runCtx, agent, messages)
+	result, err = r.executeLoop(runCtx, tracer, logger, agent, messages)
 	if err != nil {
+		rootSpan.SetError(err)
+		logger.Error("run failed", "error", err)
 		return nil, err
 	}
+
+	rootSpan.SetAttributes(
+		tracing.A("turns", result.Metrics.TotalTurns),
+		tracing.A("tokens", result.Metrics.TotalTokens),
+		tracing.A("tool_calls", result.Metrics.ToolCalls),
+		tracing.A("handoffs", result.Metrics.Handoffs),
+	)
+	logger.Info("run completed",
+		"turns", result.Metrics.TotalTurns,
+		"tokens", result.Metrics.TotalTokens,
+		"tool_calls", result.Metrics.ToolCalls,
+		"handoffs", result.Metrics.Handoffs,
+		"duration", result.Metrics.Duration,
+	)
 
 	// Save to session
 	if r.session != nil {
 		if err := r.session.AddItems(ctx, messagesToMemory(result.Messages)); err != nil {
+			rootSpan.SetError(err)
+			logger.Error("session save failed", "error", err)
 			return nil, fmt.Errorf("failed to save session: %w", err)
 		}
 	}
@@ -119,8 +166,9 @@ func (r *Runner) Run(ctx context.Context, agent *Agent, input string) (*RunResul
 	return result, nil
 }
 
-// executeLoop runs the main agent execution loop
-func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) (*RunResult, error) {
+// executeLoop runs the main agent execution loop. Each turn is wrapped in a
+// span (via a closure so the span is always ended), and emits structured logs.
+func (r *Runner) executeLoop(ctx *RunContext, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, messages []Message) (*RunResult, error) {
 	startTime := time.Now()
 	metrics := RunMetrics{}
 	currentAgent := agent
@@ -128,154 +176,235 @@ func (r *Runner) executeLoop(ctx *RunContext, agent *Agent, messages []Message) 
 	for turn := 0; turn < ctx.MaxTurns; turn++ {
 		ctx.CurrentTurn = turn
 
-		// Check context cancellation
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("context cancelled: %w", err)
 		}
 
-		// Validate input with guardrails
-		if err := r.validateGuardrails(currentAgent, messages); err != nil {
-			return nil, fmt.Errorf("guardrail validation failed: %w", err)
-		}
+		var (
+			result    *RunResult
+			nextAgent *Agent
+		)
 
-		// Get LLM completion
-		toolDefs := convertToolsToProviders(currentAgent.Tools)
-		completion, err := r.provider.Complete(ctx.Context, currentAgent, messagesToProviders(messages), toolDefs)
-		if err != nil {
-			return nil, fmt.Errorf("completion failed: %w", err)
-		}
+		turnErr := func() error {
+			turnCtx, turnSpan := tracing.Start(ctx.Context, tracer, "turn",
+				tracing.A("n", turn), tracing.A("agent", currentAgent.Name))
+			defer turnSpan.End()
 
-		metrics.TotalTokens += completion.Usage.TotalTokens
-		messages = append(messages, messageFromProviders(completion.Message))
-
-		// Check for final output
-		if currentAgent.OutputType != nil && completion.StructuredOutput != nil {
-			metrics.Duration = time.Since(startTime)
-			metrics.TotalTurns = turn + 1
-
-			return &RunResult{
-				FinalOutput: completion.StructuredOutput,
-				Messages:    messages,
-				Agent:       currentAgent,
-				Metrics:     metrics,
-			}, nil
-		}
-
-		// Handle handoffs
-		if completion.Handoff != nil {
-			metrics.Handoffs++
-
-			newAgent, ok := currentAgent.GetHandoff(completion.Handoff.TargetAgent)
-			if !ok {
-				return nil, fmt.Errorf("handoff agent not found: %s", completion.Handoff.TargetAgent)
+			// Guardrails
+			if err := r.validateGuardrails(turnCtx, tracer, logger, currentAgent, messages); err != nil {
+				turnSpan.SetError(err)
+				return fmt.Errorf("guardrail validation failed: %w", err)
 			}
 
-			currentAgent = newAgent
-			continue
-		}
+			// LLM completion
+			toolDefs := convertToolsToProviders(currentAgent.EffectiveTools())
+			_, llmSpan := tracing.Start(turnCtx, tracer, "llm.complete",
+				tracing.A("model", currentAgent.Model),
+				tracing.A("messages", len(messages)),
+				tracing.A("tools", len(toolDefs)))
+			logger.Debug("llm request", "turn", turn, "agent", currentAgent.Name,
+				"model", currentAgent.Model, "messages", len(messages), "tools", len(toolDefs))
 
-		// Handle tool calls
-		if len(completion.ToolCalls) > 0 {
-			metrics.ToolCalls += len(completion.ToolCalls)
-
-			toolResponses, err := r.executeTools(ctx, currentAgent, toolCallsFromProviders(completion.ToolCalls))
+			completion, err := r.provider.Complete(turnCtx, currentAgent, messagesToProviders(messages), toolDefs)
 			if err != nil {
-				return nil, fmt.Errorf("tool execution failed: %w", err)
+				llmSpan.SetError(err)
+				llmSpan.End()
+				turnSpan.SetError(err)
+				logger.Error("llm request failed", "turn", turn, "error", err)
+				return fmt.Errorf("completion failed: %w", err)
+			}
+			llmSpan.SetAttributes(
+				tracing.A("tokens", completion.Usage.TotalTokens),
+				tracing.A("tool_calls", len(completion.ToolCalls)))
+			llmSpan.End()
+			logger.Debug("llm response", "turn", turn,
+				"tokens", completion.Usage.TotalTokens,
+				"tool_calls", len(completion.ToolCalls),
+				"content_chars", len(completion.Message.Content))
+
+			metrics.TotalTokens += completion.Usage.TotalTokens
+
+			// turnStart marks the history boundary before this assistant turn,
+			// used to fork a clean context for delegated subagents.
+			turnStart := len(messages)
+			messages = append(messages, messageFromProviders(completion.Message))
+
+			// Structured output -> done.
+			if currentAgent.OutputType != nil && completion.StructuredOutput != nil {
+				metrics.Duration = time.Since(startTime)
+				metrics.TotalTurns = turn + 1
+				result = &RunResult{FinalOutput: completion.StructuredOutput, Messages: messages, Agent: currentAgent, Metrics: metrics}
+				return nil
 			}
 
-			// Add tool responses as messages
-			for _, resp := range toolResponses {
-				messages = append(messages, Message{
-					Role:      "tool",
-					Content:   fmt.Sprintf("%v", resp.Content),
-					Timestamp: time.Now(),
-					Metadata: map[string]interface{}{
-						"tool_call_id": resp.ToolCallID,
-					},
-				})
+			// Legacy provider-driven handoff (transfer of control).
+			if completion.Handoff != nil {
+				newAgent, ok := currentAgent.GetHandoff(completion.Handoff.TargetAgent)
+				if !ok {
+					return fmt.Errorf("handoff agent not found: %s", completion.Handoff.TargetAgent)
+				}
+				metrics.Handoffs++
+				logger.Info("handoff", "from", currentAgent.Name, "to", newAgent.Name, "mode", "shared")
+				nextAgent = newAgent
+				return nil
 			}
 
-			continue
+			// Tool calls, separating handoff tool calls from regular ones.
+			if len(completion.ToolCalls) > 0 {
+				var (
+					normalCalls []ToolCall
+					handoffList []pendingHandoff
+				)
+				for _, call := range toolCallsFromProviders(completion.ToolCalls) {
+					if sub, mode, ok := currentAgent.HandoffForTool(call.Name); ok {
+						task, _ := call.Arguments["task"].(string)
+						handoffList = append(handoffList, pendingHandoff{call: call, sub: sub, mode: mode, task: task})
+						continue
+					}
+					normalCalls = append(normalCalls, call)
+				}
+
+				if len(normalCalls) > 0 {
+					metrics.ToolCalls += len(normalCalls)
+					for _, resp := range r.executeTools(turnCtx, tracer, logger, currentAgent, normalCalls) {
+						messages = append(messages, toolMessage(resp.ToolCallID, toolContent(resp)))
+					}
+				}
+
+				// Only one handoff is acted on per turn; acknowledge extras.
+				for i := 1; i < len(handoffList); i++ {
+					messages = append(messages, toolMessage(handoffList[i].call.ID,
+						"Ignored: only one handoff is processed per turn."))
+				}
+
+				if len(handoffList) > 0 {
+					h := handoffList[0]
+					metrics.Handoffs++
+
+					if h.mode == ContextShared {
+						logger.Info("handoff", "from", currentAgent.Name, "to", h.sub.Name, "mode", "shared")
+						messages = append(messages, toolMessage(h.call.ID,
+							fmt.Sprintf("Transferring to %s.", h.sub.Name)))
+						nextAgent = h.sub
+						return nil
+					}
+
+					// ContextFresh / ContextForked: delegate and return the result.
+					delegateCtx, hSpan := tracing.Start(turnCtx, tracer, "handoff.delegate",
+						tracing.A("to", h.sub.Name), tracing.A("mode", h.mode.String()), tracing.A("task", h.task))
+					logger.Info("delegate", "from", currentAgent.Name, "to", h.sub.Name, "mode", h.mode.String())
+
+					nested := buildHandoffMessages(h.mode, messages[:turnStart], h.task)
+					subCtx := *ctx
+					subCtx.Context = delegateCtx
+					subResult, err := r.executeLoop(&subCtx, tracer, logger.With("parent", currentAgent.Name), h.sub, nested)
+					if err != nil {
+						hSpan.SetError(err)
+						hSpan.End()
+						return fmt.Errorf("subagent %q failed: %w", h.sub.Name, err)
+					}
+					hSpan.SetAttributes(tracing.A("tokens", subResult.Metrics.TotalTokens))
+					hSpan.End()
+					metrics.TotalTokens += subResult.Metrics.TotalTokens
+					metrics.ToolCalls += subResult.Metrics.ToolCalls
+					metrics.Handoffs += subResult.Metrics.Handoffs
+					messages = append(messages, toolMessage(h.call.ID,
+						fmt.Sprintf("%v", subResult.FinalOutput)))
+				}
+				return nil // continue to next turn
+			}
+
+			// Plain text final output.
+			if currentAgent.OutputType == nil {
+				metrics.Duration = time.Since(startTime)
+				metrics.TotalTurns = turn + 1
+				result = &RunResult{FinalOutput: completion.Message.Content, Messages: messages, Agent: currentAgent, Metrics: metrics}
+			}
+			return nil
+		}()
+
+		if turnErr != nil {
+			return nil, turnErr
 		}
-
-		// If no tools, handoffs, or structured output, we have final output
-		if currentAgent.OutputType == nil {
-			metrics.Duration = time.Since(startTime)
-			metrics.TotalTurns = turn + 1
-
-			return &RunResult{
-				FinalOutput: completion.Message.Content,
-				Messages:    messages,
-				Agent:       currentAgent,
-				Metrics:     metrics,
-			}, nil
+		if result != nil {
+			return result, nil
+		}
+		if nextAgent != nil {
+			currentAgent = nextAgent
 		}
 	}
 
 	return nil, ErrMaxTurnsExceeded
 }
 
-// executeTools runs tool calls in parallel or sequence
-func (r *Runner) executeTools(ctx *RunContext, agent *Agent, toolCalls []ToolCall) ([]ToolResponse, error) {
+// executeTools runs tool calls in parallel or sequence, tracing and logging
+// each. Per-tool failures are reported in the corresponding ToolResponse.Error
+// (and fed back to the model), so this never fails as a whole.
+func (r *Runner) executeTools(ctx context.Context, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, toolCalls []ToolCall) []ToolResponse {
 	responses := make([]ToolResponse, len(toolCalls))
 
 	if r.parallelTools && len(toolCalls) > 1 {
-		// Execute tools in parallel
-		g, gCtx := errgroup.WithContext(ctx.Context)
-
+		var wg sync.WaitGroup
 		for i, call := range toolCalls {
 			i, call := i, call // capture loop variables
-
-			g.Go(func() error {
-				tool := r.findTool(agent, call.Name)
-				if tool == nil {
-					responses[i] = ToolResponse{
-						ToolCallID: call.ID,
-						Error:      fmt.Errorf("tool not found: %s", call.Name),
-					}
-					return nil
-				}
-
-				result, err := tool.Execute(gCtx, call.Arguments)
-				responses[i] = ToolResponse{
-					ToolCallID: call.ID,
-					Content:    result,
-					Error:      err,
-				}
-				return nil
-			})
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				responses[i] = r.runTool(ctx, tracer, logger, agent, call)
+			}()
 		}
-
-		if err := g.Wait(); err != nil {
-			return nil, err
-		}
+		wg.Wait()
 	} else {
-		// Execute tools sequentially
 		for i, call := range toolCalls {
-			tool := r.findTool(agent, call.Name)
-			if tool == nil {
-				responses[i] = ToolResponse{
-					ToolCallID: call.ID,
-					Error:      fmt.Errorf("tool not found: %s", call.Name),
-				}
-				continue
-			}
-
-			result, err := tool.Execute(ctx.Context, call.Arguments)
-			responses[i] = ToolResponse{
-				ToolCallID: call.ID,
-				Content:    result,
-				Error:      err,
-			}
+			responses[i] = r.runTool(ctx, tracer, logger, agent, call)
 		}
 	}
 
-	return responses, nil
+	return responses
 }
 
-// findTool locates a tool by name
+// runTool executes a single tool call within its own span.
+func (r *Runner) runTool(ctx context.Context, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, call ToolCall) ToolResponse {
+	ctx, span := tracing.Start(ctx, tracer, "tool.execute",
+		tracing.A("tool", call.Name),
+		tracing.A("args", argsPreview(call.Arguments)))
+	defer span.End()
+
+	tool := r.findTool(agent, call.Name)
+	if tool == nil {
+		err := fmt.Errorf("tool not found: %s", call.Name)
+		span.SetError(err)
+		logger.Warn("tool not found", "tool", call.Name)
+		return ToolResponse{ToolCallID: call.ID, Error: err}
+	}
+
+	start := time.Now()
+	logger.Debug("tool call", "tool", call.Name)
+	result, err := tool.Execute(ctx, call.Arguments)
+	if err != nil {
+		span.SetError(err)
+		logger.Error("tool failed", "tool", call.Name, "error", err, "duration", time.Since(start))
+		return ToolResponse{ToolCallID: call.ID, Error: err}
+	}
+
+	resultStr := fmt.Sprintf("%v", result)
+	span.SetAttributes(tracing.A("result_chars", len(resultStr)))
+	logger.Debug("tool result", "tool", call.Name, "duration", time.Since(start), "result_chars", len(resultStr))
+	return ToolResponse{ToolCallID: call.ID, Content: result}
+}
+
+// argsPreview renders tool arguments compactly for trace attributes.
+func argsPreview(args map[string]interface{}) string {
+	b, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Sprintf("%v", args)
+	}
+	return string(b)
+}
+
+// findTool locates a tool by name, including builtins such as load_skill.
 func (r *Runner) findTool(agent *Agent, name string) tools.Tool {
-	for _, tool := range agent.Tools {
+	for _, tool := range agent.EffectiveTools() {
 		if tool.Name() == name {
 			return tool
 		}
@@ -283,20 +412,24 @@ func (r *Runner) findTool(agent *Agent, name string) tools.Tool {
 	return nil
 }
 
-// validateGuardrails runs all guardrail checks
-func (r *Runner) validateGuardrails(agent *Agent, messages []Message) error {
+// validateGuardrails runs all guardrail checks for the latest message.
+func (r *Runner) validateGuardrails(ctx context.Context, tracer tracing.Tracer, logger *slog.Logger, agent *Agent, messages []Message) error {
 	if len(messages) == 0 || len(agent.Guardrails) == 0 {
 		return nil
 	}
 
-	lastMessage := messages[len(messages)-1]
+	_, span := tracing.Start(ctx, tracer, "guardrails", tracing.A("count", len(agent.Guardrails)))
+	defer span.End()
 
+	lastMessage := messages[len(messages)-1]
 	for _, guardrail := range agent.Guardrails {
 		if err := guardrail.Validate(lastMessage.Content); err != nil {
-			return fmt.Errorf("guardrail %T failed: %w", guardrail, err)
+			span.SetError(err)
+			logger.Warn("guardrail blocked", "guardrail", guardrail.Name(), "error", err)
+			return fmt.Errorf("guardrail %s failed: %w", guardrail.Name(), err)
 		}
 	}
-
+	logger.Debug("guardrails passed", "count", len(agent.Guardrails))
 	return nil
 }
 
@@ -418,24 +551,24 @@ func convertProperties(props map[string]tools.PropertySchema) map[string]provide
 	return result
 }
 
-// RunAsync provides a channel-based async interface
-func RunAsync(ctx context.Context, agent *Agent, input string, opts ...RunnerOption) <-chan *RunResult {
-	resultChan := make(chan *RunResult, 1)
+// AsyncResult carries the outcome of a RunAsync call, including any error.
+type AsyncResult struct {
+	Result *RunResult
+	Err    error
+}
+
+// RunAsync provides a channel-based async interface. The sent AsyncResult
+// carries either a Result or an Err, so callers can distinguish failure from a
+// successful run rather than string-sniffing the output.
+func RunAsync(ctx context.Context, agent *Agent, input string, opts ...RunnerOption) <-chan AsyncResult {
+	resultChan := make(chan AsyncResult, 1)
 
 	go func() {
 		defer close(resultChan)
 
 		runner := NewRunner(opts...)
 		result, err := runner.Run(ctx, agent, input)
-
-		if err != nil {
-			// Include error in result
-			result = &RunResult{
-				FinalOutput: fmt.Sprintf("Error: %v", err),
-			}
-		}
-
-		resultChan <- result
+		resultChan <- AsyncResult{Result: result, Err: err}
 	}()
 
 	return resultChan
